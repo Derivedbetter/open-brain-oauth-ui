@@ -1,0 +1,12 @@
+project_id = "open-brain-web-gateway"
+
+[functions.open-brain-web-gateway]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/open-brain-web-gateway/index.ts"
+
+[functions.open-brain-oauth-ui]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/open-brain-oauth-ui/index.ts"
+

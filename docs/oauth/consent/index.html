@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src https://zoptbgumxukgpkgbtnpz.supabase.co; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'">
+  <title>Authorize Open Brain</title>
+  <style>
+    :root{font-family:Inter,system-ui,sans-serif;color:#18201c;background:#f5f7f6}body{margin:0;min-height:100vh;display:grid;place-items:center}.card{width:min(560px,calc(100% - 40px));background:#fff;border:1px solid #dce4df;border-radius:18px;padding:30px;box-shadow:0 18px 50px #173a2520}h1{margin:0 0 10px;font-size:26px}p{line-height:1.5;color:#4e5c54}.details{background:#f4f8f5;border-radius:12px;padding:14px;margin:18px 0;overflow-wrap:anywhere}.row{margin:8px 0}.label{font-weight:700}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}button,input{font:inherit;border-radius:10px;padding:11px 14px}input{width:100%;box-sizing:border-box;border:1px solid #bac8bf}button{border:0;background:#23864c;color:white;font-weight:700;cursor:pointer}button.secondary{background:#e9efeb;color:#26352b}button:disabled{opacity:.55;cursor:not-allowed}.status{min-height:24px;margin-top:12px;color:#9a3412}.links{margin-top:20px;font-size:14px}.links a{color:#176a3a;margin-right:12px}
+  </style>
+</head>
+<body>
+<main class="card">
+  <h1>Authorize Tony's Open Brain</h1>
+  <p>This private consent screen grants an approved AI client access to Tony's shared operational memory. It is not Continuity, COTA, Current-State Tracker, or owner-acceptance authority.</p>
+  <section id="login">
+    <label class="label" for="email">Tony's approved email</label>
+    <input id="email" type="email" autocomplete="email" placeholder="name@example.com">
+    <div class="actions"><button id="send-link">Send secure sign-in link</button></div>
+  </section>
+  <section id="consent" hidden>
+    <div class="details">
+      <div class="row"><span class="label">Application:</span> <span id="client-name"></span></div>
+      <div class="row"><span class="label">Redirect:</span> <span id="redirect-uri"></span></div>
+      <div class="row"><span class="label">Requested access:</span> <span id="scope"></span></div>
+    </div>
+    <p>Approve only if you initiated this connection. Open Brain captures content only when you explicitly request a capture.</p>
+    <div class="actions">
+      <button id="approve">Approve</button>
+      <button id="deny" class="secondary">Deny</button>
+      <button id="sign-out" class="secondary">Sign out</button>
+    </div>
+  </section>
+  <div id="status" class="status" role="status"></div>
+  <div class="links"><a href="../../privacy/">Privacy</a><a href="../../terms/">Terms</a></div>
+</main>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+const client=createClient(
+  'https://zoptbgumxukgpkgbtnpz.supabase.co',
+  'sb_publishable_PxKBCqRWmTJpBi6cudSsxg_Mgiut8sp',
+  {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}
+);
+const authorizationId=new URLSearchParams(location.search).get('authorization_id');
+const login=document.querySelector('#login');
+const consent=document.querySelector('#consent');
+const status=document.querySelector('#status');
+const setStatus=(message)=>{status.textContent=message||''};
+async function show(){
+  const {data:{session}}=await client.auth.getSession();
+  if(!session){login.hidden=false;consent.hidden=true;return}
+  if(!authorizationId){login.hidden=true;consent.hidden=true;setStatus('Missing authorization request. Return to the app and start the connection again.');return}
+  const {data,error}=await client.auth.oauth.getAuthorizationDetails(authorizationId);
+  if(error||!data){setStatus(error?.message||'Invalid authorization request.');return}
+  if(!('authorization_id' in data)&&data.redirect_url){location.assign(data.redirect_url);return}
+  login.hidden=true;consent.hidden=false;
+  document.querySelector('#client-name').textContent=data.client?.name||'Approved AI client';
+  document.querySelector('#redirect-uri').textContent=data.redirect_uri||'';
+  document.querySelector('#scope').textContent=data.scope||'email';
+}
+document.querySelector('#send-link').addEventListener('click',async()=>{
+  const email=document.querySelector('#email').value.trim();
+  if(!email){setStatus('Enter the approved email address.');return}
+  setStatus('Sending secure sign-in link...');
+  const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:location.href}});
+  setStatus(error?error.message:'Check your email and open the sign-in link in this browser.');
+});
+document.querySelector('#approve').addEventListener('click',async()=>{
+  setStatus('Approving...');
+  const {data,error}=await client.auth.oauth.approveAuthorization(authorizationId);
+  if(error){setStatus(error.message);return}
+  location.assign(data.redirect_url);
+});
+document.querySelector('#deny').addEventListener('click',async()=>{
+  setStatus('Denying...');
+  const {data,error}=await client.auth.oauth.denyAuthorization(authorizationId);
+  if(error){setStatus(error.message);return}
+  location.assign(data.redirect_url);
+});
+document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
+client.auth.onAuthStateChange(()=>setTimeout(show,0));
+await show();
+</script>
+</body>
+</html>

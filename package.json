@@ -1,0 +1,10 @@
+{
+  "name": "open-brain-web-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "deno check supabase/functions/open-brain-web-gateway/index.ts supabase/functions/open-brain-oauth-ui/index.ts"
+  }
+}
