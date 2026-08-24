@@ -21,10 +21,10 @@ OAuth-protected remote MCP gateway for Tony's Gemini Spark and Perplexity web cl
 1. Supabase OAuth 2.1 Server enabled with authorization path `/oauth/consent`.
 2. Auth Site URL: `https://derivedbetter.github.io/open-brain-oauth-ui`.
 3. Authorization path: `/oauth/consent/` and redirect allowlist includes `https://derivedbetter.github.io/open-brain-oauth-ui/**`.
-4. Two pre-registered confidential clients: Gemini Spark and Perplexity.
+4. Pre-registered confidential clients for Gemini full access, Gemini Spark read-only access, Perplexity, and Claude.
 5. Edge secrets:
    - `OPEN_BRAIN_ALLOWED_EMAILS=<approved-email>`
-   - `OPEN_BRAIN_OAUTH_CLIENT_IDS=<gemini-client-id>,<perplexity-client-id>`
+   - `OPEN_BRAIN_OAUTH_CLIENT_IDS=<full-gemini-client-id>,<perplexity-client-id>,<claude-client-id>`
    - `OPEN_BRAIN_READ_ONLY_OAUTH_CLIENT_IDS=<read-only-gemini-client-id>`
    - optional `OPEN_BRAIN_OAUTH_AUDIENCES=authenticated,<gateway-url>`
    - existing `MCP_ACCESS_KEY` remains server-side.
