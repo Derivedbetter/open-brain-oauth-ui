@@ -37,10 +37,48 @@ test("maps exact and summary aliases to vanilla capture_thought", () => {
 });
 
 test("decorates tools with exact payload and failure rules", () => {
-  const messages = decorateToolList([{ result: { tools: [{
-    name: "capture_thought", description: "Capture.", inputSchema: { type: "object" },
-  }] } }]);
+  const closedWorldReadTools = [
+    "export_memory_changes",
+    "fetch",
+    "list_thoughts",
+    "memory_audit",
+    "search",
+    "search_thoughts",
+    "thought_stats",
+  ].map((name) => ({
+    name,
+    description: `Read with ${name}.`,
+    annotations: { readOnlyHint: true },
+    inputSchema: { type: "object" },
+  }));
+  const messages = decorateToolList([{ result: { tools: [
+    ...closedWorldReadTools,
+    {
+      name: "external_lookup",
+      description: "Read from an open-world source.",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      inputSchema: { type: "object" },
+    },
+    {
+      name: "capture_thought",
+      description: "Capture.",
+      annotations: { readOnlyHint: false, openWorldHint: false },
+      inputSchema: { type: "object" },
+    },
+  ] } }]);
   const tools = messages[0].result.tools;
+  for (const { name } of closedWorldReadTools) {
+    assert.deepEqual(tools.find((tool) => tool.name === name).annotations, {
+      readOnlyHint: true,
+      openWorldHint: false,
+    });
+  }
+  assert.deepEqual(tools.find((tool) => tool.name === "external_lookup").annotations, {
+    readOnlyHint: true,
+    openWorldHint: true,
+  });
+  assert.equal(tools.find((tool) => tool.name === "capture_thought").annotations.readOnlyHint, false);
+  assert.equal(tools.find((tool) => tool.name === "capture_thought").annotations.openWorldHint, false);
   assert.match(tools.find((tool) => tool.name === "capture_thought_exact").description, /preserve it literally/);
   assert.match(tools.find((tool) => tool.name === "capture_thought_summary").description, /report failure instead of improvising/);
   assert.match(tools.find((tool) => tool.name === "capture_thought").description, /never capture a transcript automatically/);

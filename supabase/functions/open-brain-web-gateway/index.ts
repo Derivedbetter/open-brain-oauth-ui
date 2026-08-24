@@ -239,7 +239,8 @@ Deno.serve(async (request: Request) => {
     const captureContent = (mcpRequest.params as {
       arguments?: { content?: unknown };
     } | undefined)?.arguments?.content;
-    if (isCaptureCall(mcpRequest) && typeof captureContent === "string" && upstream.response.ok &&
+    if (mode !== null && isCaptureCall(mcpRequest) && typeof captureContent === "string" &&
+      upstream.response.ok &&
       !messages.some((message) => {
         const result = message?.result as Record<string, unknown> | undefined;
         return Boolean(message?.error || result?.isError);

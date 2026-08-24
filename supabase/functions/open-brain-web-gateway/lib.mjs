@@ -4,6 +4,16 @@ const CAPTURE_TOOLS = new Set([
   "capture_thought_summary",
 ]);
 
+const CLOSED_WORLD_READ_TOOLS = new Set([
+  "export_memory_changes",
+  "fetch",
+  "list_thoughts",
+  "memory_audit",
+  "search",
+  "search_thoughts",
+  "thought_stats",
+]);
+
 export function parseMcpResponse(contentType, body) {
   if (!body.trim()) return [];
   if (!contentType.toLowerCase().includes("text/event-stream")) {
@@ -60,6 +70,14 @@ export function decorateToolList(messages) {
   for (const message of messages) {
     const tools = message?.result?.tools;
     if (!Array.isArray(tools)) continue;
+    for (const tool of tools) {
+      if (!CLOSED_WORLD_READ_TOOLS.has(tool?.name)) continue;
+      tool.annotations = {
+        ...(tool.annotations ?? {}),
+        readOnlyHint: true,
+        openWorldHint: false,
+      };
+    }
     const capture = tools.find((tool) => tool?.name === "capture_thought");
     if (!capture) continue;
     capture.description = `${capture.description} ${commonCaptureDescription()}`;
