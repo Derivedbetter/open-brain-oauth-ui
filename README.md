@@ -12,7 +12,7 @@ OAuth-protected remote MCP gateway for Tony's Gemini Spark and Perplexity web cl
 
 ## Components
 
-- `open-brain-web-gateway`: OAuth-protected Streamable HTTP MCP relay with client/user allowlists, exact and summary aliases, and authoritative post-write receipts.
+- `open-brain-web-gateway`: OAuth-protected Streamable HTTP MCP relay with client/user allowlists, exact and summary aliases, authoritative post-write receipts, and a server-enforced `/readonly` route that exposes only the seven bounded read tools.
 - `docs/`: GitHub Pages email-link sign-in and OAuth consent UI, plus privacy and terms pages.
 - `open-brain-oauth-ui`: deployable source retained as a fallback for a future custom Supabase domain; the default Supabase Functions domain intentionally rewrites HTML to plain text.
 
@@ -25,6 +25,7 @@ OAuth-protected remote MCP gateway for Tony's Gemini Spark and Perplexity web cl
 5. Edge secrets:
    - `OPEN_BRAIN_ALLOWED_EMAILS=<approved-email>`
    - `OPEN_BRAIN_OAUTH_CLIENT_IDS=<gemini-client-id>,<perplexity-client-id>`
+   - `OPEN_BRAIN_READ_ONLY_OAUTH_CLIENT_IDS=<read-only-gemini-client-id>`
    - optional `OPEN_BRAIN_OAUTH_AUDIENCES=authenticated,<gateway-url>`
    - existing `MCP_ACCESS_KEY` remains server-side.
 
@@ -41,7 +42,10 @@ npx -y supabase@latest functions deploy open-brain-web-gateway --project-ref zop
 Test discovery and unauthenticated failure before connecting a client:
 
 - `GET /functions/v1/open-brain-web-gateway/.well-known/oauth-protected-resource` returns protected-resource metadata.
+- `GET /functions/v1/open-brain-web-gateway/readonly/.well-known/oauth-protected-resource` returns distinct read-only protected-resource metadata.
 - unauthenticated `POST /functions/v1/open-brain-web-gateway` returns `401` and an OAuth `WWW-Authenticate` challenge.
+- authenticated `tools/list` on `/functions/v1/open-brain-web-gateway/readonly` omits every write/delete tool, and direct write calls fail closed.
+- OAuth clients are endpoint-scoped: read-only client tokens are rejected by the full-access route, and full-access client tokens are rejected by the read-only route.
 - invalid user, client, issuer, audience, and expired tokens fail closed without an upstream call.
 
 ## Rollback

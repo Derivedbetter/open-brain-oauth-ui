@@ -5,10 +5,14 @@ import {
   captureMode,
   decodeJwtPayload,
   decorateToolList,
+  filterReadOnlyToolList,
   isCaptureCall,
   normalizeContent,
+  oauthClientAllowlist,
   parseMcpResponse,
   requestForUpstream,
+  readOnlyBlockedResponse,
+  readOnlyRequestAllowed,
   serializeMcpResponse,
   splitAllowlist,
 } from "./lib.mjs";
@@ -17,7 +21,7 @@ const PROJECT_REF = "zoptbgumxukgpkgbtnpz";
 const PROJECT_URL = `https://${PROJECT_REF}.supabase.co`;
 const AUTH_ISSUER = `${PROJECT_URL}/auth/v1`;
 const GATEWAY_URL = `${PROJECT_URL}/functions/v1/open-brain-web-gateway`;
-const RESOURCE_METADATA_URL = `${GATEWAY_URL}/.well-known/oauth-protected-resource`;
+const READ_ONLY_GATEWAY_URL = `${GATEWAY_URL}/readonly`;
 const UPSTREAM_URL = `${PROJECT_URL}/functions/v1/open-brain-mcp`;
 const MAX_MESSAGE_BYTES = 1_048_576;
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -43,46 +47,58 @@ function json(data: unknown, status = 200, headers: HeadersInit = {}) {
   });
 }
 
-function unauthorized(message = "OAuth authorization is required") {
+function unauthorized(
+  resourceUrl: string,
+  message = "OAuth authorization is required",
+) {
+  const metadataUrl = `${resourceUrl}/.well-known/oauth-protected-resource`;
   return json({ error: "unauthorized", error_description: message }, 401, {
-    "www-authenticate": `Bearer resource_metadata="${RESOURCE_METADATA_URL}", scope="email"`,
+    "www-authenticate": `Bearer resource_metadata="${metadataUrl}", scope="email"`,
   });
 }
 
-function protectedResourceMetadata() {
+function protectedResourceMetadata(resourceUrl: string, readOnly: boolean) {
   return {
-    resource: GATEWAY_URL,
+    resource: resourceUrl,
     authorization_servers: [AUTH_ISSUER],
     scopes_supported: ["email"],
     bearer_methods_supported: ["header"],
-    resource_name: "Tony Open Brain",
+    resource_name: readOnly ? "Tony Open Brain Read Only" : "Tony Open Brain",
   };
 }
 
-async function authorize(request: Request) {
+async function authorize(request: Request, resourceUrl: string, readOnly: boolean) {
   const header = request.headers.get("authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(header);
-  if (!match) return { error: unauthorized() };
+  if (!match) return { error: unauthorized(resourceUrl) };
 
   const token = match[1].trim();
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? PROJECT_URL;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!anonKey) return { error: unauthorized("Gateway authentication is not configured") };
+  if (!anonKey) {
+    return { error: unauthorized(resourceUrl, "Gateway authentication is not configured") };
+  }
 
   const supabase = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return { error: unauthorized("The access token is invalid or expired") };
+  if (error || !data.user) {
+    return { error: unauthorized(resourceUrl, "The access token is invalid or expired") };
+  }
 
   let claims: Record<string, unknown>;
   try {
     claims = decodeJwtPayload(token);
   } catch {
-    return { error: unauthorized("The access token is malformed") };
+    return { error: unauthorized(resourceUrl, "The access token is malformed") };
   }
 
-  const allowedClientIds = splitAllowlist(Deno.env.get("OPEN_BRAIN_OAUTH_CLIENT_IDS"));
+  const allowedClientIds = oauthClientAllowlist(
+    readOnly,
+    Deno.env.get("OPEN_BRAIN_OAUTH_CLIENT_IDS"),
+    Deno.env.get("OPEN_BRAIN_READ_ONLY_OAUTH_CLIENT_IDS"),
+  );
   const allowedEmails = splitAllowlist(Deno.env.get("OPEN_BRAIN_ALLOWED_EMAILS"))
     .map((email) => email.toLowerCase());
   const allowedAudiences = splitAllowlist(
@@ -96,19 +112,19 @@ async function authorize(request: Request) {
   const expiresAt = Number(claims.exp ?? 0);
 
   if (!allowedClientIds.length || !allowedClientIds.includes(clientId)) {
-    return { error: unauthorized("This OAuth client is not approved") };
+    return { error: unauthorized(resourceUrl, "This OAuth client is not approved") };
   }
   if (!allowedEmails.length || !allowedEmails.includes(email)) {
-    return { error: unauthorized("This Open Brain user is not approved") };
+    return { error: unauthorized(resourceUrl, "This Open Brain user is not approved") };
   }
   if (issuer !== AUTH_ISSUER || subject !== data.user.id) {
-    return { error: unauthorized("The token issuer or subject is invalid") };
+    return { error: unauthorized(resourceUrl, "The token issuer or subject is invalid") };
   }
   if (!audienceAllowed(claims.aud, allowedAudiences)) {
-    return { error: unauthorized("The token audience is invalid") };
+    return { error: unauthorized(resourceUrl, "The token audience is invalid") };
   }
   if (!Number.isFinite(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) {
-    return { error: unauthorized("The access token is expired") };
+    return { error: unauthorized(resourceUrl, "The access token is expired") };
   }
   return { user: data.user, clientId };
 }
@@ -202,11 +218,15 @@ async function verifyCapture(
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   const url = new URL(request.url);
+  const gatewaySuffix = url.pathname.split("/open-brain-web-gateway")[1] ?? "";
+  const readOnly = gatewaySuffix === "/readonly" ||
+    gatewaySuffix.startsWith("/readonly/");
+  const resourceUrl = readOnly ? READ_ONLY_GATEWAY_URL : GATEWAY_URL;
   if (url.pathname.endsWith("/.well-known/oauth-protected-resource")) {
-    return json(protectedResourceMetadata());
+    return json(protectedResourceMetadata(resourceUrl, readOnly));
   }
 
-  const authorization = await authorize(request);
+  const authorization = await authorize(request, resourceUrl, readOnly);
   if (authorization.error) return authorization.error;
   if (request.method !== "POST") {
     return json({ error: "method_not_allowed" }, 405, { allow: "POST, OPTIONS" });
@@ -227,6 +247,10 @@ Deno.serve(async (request: Request) => {
     return json({ error: "invalid_json" }, 400);
   }
 
+  if (readOnly && !readOnlyRequestAllowed(mcpRequest)) {
+    return json(readOnlyBlockedResponse(mcpRequest));
+  }
+
   try {
     const mode = captureMode(mcpRequest);
     const upstream = await upstreamRequest(
@@ -235,7 +259,10 @@ Deno.serve(async (request: Request) => {
       request.headers.get("mcp-session-id"),
     );
     let messages = parseMcpResponse(upstream.contentType, upstream.body);
-    if (mcpRequest.method === "tools/list") messages = decorateToolList(messages);
+    if (mcpRequest.method === "tools/list") {
+      messages = decorateToolList(messages);
+      if (readOnly) messages = filterReadOnlyToolList(messages);
+    }
     const captureContent = (mcpRequest.params as {
       arguments?: { content?: unknown };
     } | undefined)?.arguments?.content;

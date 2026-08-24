@@ -7,9 +7,13 @@ import {
   captureMode,
   decodeJwtPayload,
   decorateToolList,
+  filterReadOnlyToolList,
   isCaptureCall,
+  oauthClientAllowlist,
   parseMcpResponse,
   requestForUpstream,
+  readOnlyBlockedResponse,
+  readOnlyRequestAllowed,
   serializeMcpResponse,
   splitAllowlist,
 } from "../supabase/functions/open-brain-web-gateway/lib.mjs";
@@ -84,6 +88,34 @@ test("decorates tools with exact payload and failure rules", () => {
   assert.match(tools.find((tool) => tool.name === "capture_thought").description, /never capture a transcript automatically/);
 });
 
+test("read-only route lists only bounded reads and blocks direct writes", () => {
+  const messages = filterReadOnlyToolList([{ result: { tools: [
+    { name: "list_thoughts" },
+    { name: "search" },
+    { name: "capture_thought" },
+    { name: "write_work_receipt" },
+  ] } }]);
+  assert.deepEqual(messages[0].result.tools.map((tool) => tool.name), [
+    "list_thoughts",
+    "search",
+  ]);
+  assert.equal(readOnlyRequestAllowed({ method: "tools/list" }), true);
+  assert.equal(readOnlyRequestAllowed({
+    method: "tools/call",
+    params: { name: "fetch" },
+  }), true);
+  const blocked = { id: 42, method: "tools/call", params: { name: "capture_thought" } };
+  assert.equal(readOnlyRequestAllowed(blocked), false);
+  assert.deepEqual(readOnlyBlockedResponse(blocked), {
+    jsonrpc: "2.0",
+    id: 42,
+    error: {
+      code: -32601,
+      message: "Tool not available on the read-only Open Brain endpoint",
+    },
+  });
+});
+
 test("returns authoritative evidence or explicit verification failure", () => {
   const success = appendCaptureEvidence([{ result: { content: [] } }], {
     id: "thought-1", text: "memory", url: "https://example/thought-1",
@@ -99,5 +131,12 @@ test("decodes JWT claims and enforces allowlist helpers", () => {
   assert.equal(audienceAllowed(payload.aud, ["gateway"]), true);
   assert.equal(audienceAllowed("other", ["gateway"]), false);
   assert.deepEqual(splitAllowlist("a, b ,,c"), ["a", "b", "c"]);
+  assert.deepEqual(oauthClientAllowlist(false, "full-1,full-2", "read-1"), [
+    "full-1",
+    "full-2",
+  ]);
+  assert.deepEqual(oauthClientAllowlist(true, "full-1,full-2", "read-1"), [
+    "read-1",
+  ]);
 });
 

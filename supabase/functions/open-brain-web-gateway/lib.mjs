@@ -14,6 +14,35 @@ const CLOSED_WORLD_READ_TOOLS = new Set([
   "thought_stats",
 ]);
 
+export function isReadOnlyTool(name) {
+  return CLOSED_WORLD_READ_TOOLS.has(name);
+}
+
+export function filterReadOnlyToolList(messages) {
+  for (const message of messages) {
+    const tools = message?.result?.tools;
+    if (!Array.isArray(tools)) continue;
+    message.result.tools = tools.filter((tool) => isReadOnlyTool(tool?.name));
+  }
+  return messages;
+}
+
+export function readOnlyRequestAllowed(request) {
+  if (request?.method !== "tools/call") return true;
+  return isReadOnlyTool(request?.params?.name);
+}
+
+export function readOnlyBlockedResponse(request) {
+  return {
+    jsonrpc: "2.0",
+    id: request?.id ?? null,
+    error: {
+      code: -32601,
+      message: "Tool not available on the read-only Open Brain endpoint",
+    },
+  };
+}
+
 export function parseMcpResponse(contentType, body) {
   if (!body.trim()) return [];
   if (!contentType.toLowerCase().includes("text/event-stream")) {
@@ -155,5 +184,9 @@ export function audienceAllowed(audience, allowed) {
 
 export function splitAllowlist(value) {
   return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+export function oauthClientAllowlist(readOnly, fullClientIds, readOnlyClientIds) {
+  return splitAllowlist(readOnly ? readOnlyClientIds : fullClientIds);
 }
 
