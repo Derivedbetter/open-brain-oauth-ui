@@ -4,6 +4,15 @@ const CAPTURE_TOOLS = new Set([
   "capture_thought_summary",
 ]);
 
+const SERVER_TIME_ZONE = "America/New_York";
+const easternTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: SERVER_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+  timeZoneName: "short",
+});
+
 const CLOSED_WORLD_READ_TOOLS = new Set([
   "export_memory_changes",
   "fetch",
@@ -65,6 +74,52 @@ export function serializeMcpResponse(contentType, messages) {
   return messages.length === 1
     ? JSON.stringify(messages[0])
     : messages.map((message) => JSON.stringify(message)).join("\n");
+}
+
+function isJsonPayloadText(text) {
+  const value = text.trim();
+  if (!value) return false;
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function formatToolResponse(messages, clock = () => new Date()) {
+  const instant = clock();
+  const serverTime = [
+    `Server time: ${instant.toISOString()} (${easternTimeFormatter.format(instant)},`,
+    `${SERVER_TIME_ZONE})`,
+  ].join(" ");
+
+  for (const message of messages) {
+    const result = message?.result;
+    if (!result || typeof result !== "object") continue;
+
+    if (!Array.isArray(result.content)) {
+      result.content = [{ type: "text", text: serverTime }];
+      return messages;
+    }
+
+    const humanText = result.content.find((item) =>
+      item?.type === "text" &&
+      typeof item.text === "string" &&
+      !isJsonPayloadText(item.text)
+    );
+    if (humanText) {
+      humanText.text = humanText.text
+        ? `${serverTime}\n\n${humanText.text}`
+        : serverTime;
+      return messages;
+    }
+
+    result.content.unshift({ type: "text", text: serverTime });
+    return messages;
+  }
+
+  return messages;
 }
 
 export function captureMode(request) {
