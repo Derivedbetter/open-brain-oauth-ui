@@ -87,7 +87,22 @@ function isJsonPayloadText(text) {
   }
 }
 
+function hasLeadingServerTime(result) {
+  return Array.isArray(result?.content) && result.content.some((item) =>
+    item?.type === "text" &&
+    typeof item.text === "string" &&
+    item.text.startsWith("Server time:")
+  );
+}
+
 export function formatToolResponse(messages, clock = () => new Date()) {
+  for (const message of messages) {
+    const result = message?.result;
+    if (result && typeof result === "object" && hasLeadingServerTime(result)) {
+      return messages;
+    }
+  }
+
   const instant = clock();
   const serverTime = [
     `Server time: ${instant.toISOString()} (${easternTimeFormatter.format(instant)},`,

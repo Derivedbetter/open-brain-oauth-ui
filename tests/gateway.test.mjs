@@ -49,6 +49,27 @@ test("formats tool responses from one injected server-clock sample", () => {
   assert.equal(messages[0].result.content[0].text.match(/^Server time:/gm).length, 1);
 });
 
+test("preserves an upstream server-time line without sampling or duplicating it", () => {
+  let clockSamples = 0;
+  const upstream = "Server time: 2026-08-27T12:34:56.789Z (8:34 AM EDT, America/New_York)";
+  const messages = [{ result: { content: [
+    { type: "text", text: upstream },
+    { type: "text", text: JSON.stringify({ id: "thought-1" }) },
+  ] } }];
+
+  formatToolResponse(messages, () => {
+    clockSamples += 1;
+    return new Date("2026-08-27T12:35:00.000Z");
+  });
+
+  assert.equal(clockSamples, 0);
+  assert.equal(messages[0].result.content[0].text, upstream);
+  assert.equal(
+    messages[0].result.content.flatMap((item) => item.text.match(/^Server time:/gm) ?? []).length,
+    1,
+  );
+});
+
 test("formats Eastern time correctly on both sides of the DST transition", () => {
   for (const [utc, eastern] of [
     ["2026-03-08T06:59:00Z", "1:59 AM EST"],
