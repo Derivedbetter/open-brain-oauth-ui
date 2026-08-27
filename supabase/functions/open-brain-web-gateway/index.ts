@@ -6,7 +6,6 @@ import {
   decodeJwtPayload,
   decorateToolList,
   filterReadOnlyToolList,
-  formatToolResponse,
   isCaptureCall,
   normalizeContent,
   oauthClientAllowlist,
@@ -286,10 +285,6 @@ Deno.serve(async (request: Request) => {
       }
       messages = appendCaptureEvidence(messages, evidence, mode);
     }
-    if (mcpRequest.method === "tools/call") {
-      messages = formatToolResponse(messages);
-    }
-
     const headers = new Headers(corsHeaders);
     headers.set("content-type", upstream.contentType);
     if (upstream.sessionId) headers.set("mcp-session-id", upstream.sessionId);
