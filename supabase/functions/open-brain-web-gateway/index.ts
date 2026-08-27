@@ -6,6 +6,7 @@ import {
   decodeJwtPayload,
   decorateToolList,
   filterReadOnlyToolList,
+  formatToolResponse,
   isCaptureCall,
   normalizeContent,
   oauthClientAllowlist,
@@ -284,6 +285,9 @@ Deno.serve(async (request: Request) => {
         evidence = null;
       }
       messages = appendCaptureEvidence(messages, evidence, mode);
+    }
+    if (mcpRequest.method === "tools/call") {
+      messages = formatToolResponse(messages);
     }
 
     const headers = new Headers(corsHeaders);
