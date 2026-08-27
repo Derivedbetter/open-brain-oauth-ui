@@ -13,6 +13,7 @@ import {
   requestForUpstream,
   readOnlyBlockedResponse,
   readOnlyRequestAllowed,
+  resultJson,
   serializeMcpResponse,
   splitAllowlist,
 } from "./lib.mjs";
@@ -163,17 +164,6 @@ async function upstreamRequest(
   };
 }
 
-function resultText(messages: Array<Record<string, unknown>>) {
-  for (const message of messages) {
-    const result = message?.result as Record<string, unknown> | undefined;
-    const content = result?.content as Array<Record<string, unknown>> | undefined;
-    for (const item of content ?? []) {
-      if (item?.type === "text" && typeof item.text === "string") return item.text;
-    }
-  }
-  return null;
-}
-
 async function verifyCapture(
   content: string,
   mode: string,
@@ -189,7 +179,10 @@ async function verifyCapture(
   let candidates: Array<Record<string, unknown>> = [];
   try {
     const messages = parseMcpResponse(search.contentType, search.body);
-    candidates = JSON.parse(resultText(messages) ?? "{}").results ?? [];
+    const result = resultJson(messages) as Record<string, unknown> | null;
+    candidates = Array.isArray(result?.results)
+      ? result.results as Array<Record<string, unknown>>
+      : [];
   } catch {
     return null;
   }
@@ -203,7 +196,8 @@ async function verifyCapture(
     }, brainKey, search.sessionId);
     try {
       const messages = parseMcpResponse(fetched.contentType, fetched.body);
-      const thought = JSON.parse(resultText(messages) ?? "{}");
+      const thought = resultJson(messages) as Record<string, unknown> | null;
+      if (!thought) continue;
       const matches = mode === "exact"
         ? thought.text === content
         : normalizeContent(thought.text) === normalizeContent(content);
