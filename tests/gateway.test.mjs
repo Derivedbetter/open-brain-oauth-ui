@@ -14,6 +14,7 @@ import {
   requestForUpstream,
   readOnlyBlockedResponse,
   readOnlyRequestAllowed,
+  resultJson,
   serializeMcpResponse,
   splitAllowlist,
 } from "../supabase/functions/open-brain-web-gateway/lib.mjs";
@@ -55,6 +56,21 @@ test("round-trips the upstream server time and machine payload without duplicati
     roundTripped.result.content.flatMap((item) => item.text.match(/^Server time:/gm) ?? []).length,
     1,
   );
+});
+
+test("reads verification JSON after a leading server-time block", () => {
+  const line = "Server time: 2026-08-27T12:34:56.789Z (8:34 AM EDT, America/New_York)";
+  const searchResult = { results: [{ id: "thought-1" }] };
+  const messages = [{ result: { content: [
+    { type: "text", text: line },
+    { type: "text", text: JSON.stringify(searchResult) },
+  ] } }];
+
+  assert.deepEqual(resultJson(messages), searchResult);
+  assert.equal(resultJson([{ result: { content: [
+    { type: "text", text: line },
+    { type: "text", text: "human-readable detail" },
+  ] } }]), null);
 });
 
 test("maps exact and summary aliases to vanilla capture_thought", () => {

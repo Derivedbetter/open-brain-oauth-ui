@@ -67,6 +67,22 @@ export function serializeMcpResponse(contentType, messages) {
     : messages.map((message) => JSON.stringify(message)).join("\n");
 }
 
+export function resultJson(messages) {
+  for (const message of messages) {
+    const content = message?.result?.content;
+    if (!Array.isArray(content)) continue;
+    for (const item of content) {
+      if (item?.type !== "text" || typeof item.text !== "string") continue;
+      try {
+        return JSON.parse(item.text);
+      } catch {
+        // Visible prose, including the leading server-time block, is not JSON.
+      }
+    }
+  }
+  return null;
+}
+
 export function captureMode(request) {
   const name = request?.params?.name;
   if (name === "capture_thought_exact") return "exact";
