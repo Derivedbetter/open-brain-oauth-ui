@@ -36,7 +36,10 @@
   <div class="links"><a href="../../privacy/">Privacy</a><a href="../../terms/">Terms</a></div>
 </main>
 <script type="module">
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
+const callbackParams=new URLSearchParams(location.hash.slice(1));
+const callbackError=callbackParams.get('error_description')||callbackParams.get('error');
+const callbackAttempted=location.hash.length>1;
 const client=createClient(
   'https://zoptbgumxukgpkgbtnpz.supabase.co',
   'sb_publishable_PxKBCqRWmTJpBi6cudSsxg_Mgiut8sp',
@@ -47,23 +50,42 @@ const login=document.querySelector('#login');
 const consent=document.querySelector('#consent');
 const status=document.querySelector('#status');
 const setStatus=(message)=>{status.textContent=message||''};
-async function show(){
-  const {data:{session}}=await client.auth.getSession();
-  if(!session){login.hidden=false;consent.hidden=true;return}
+let showGeneration=0;
+async function show(sessionFromEvent){
+  const generation=++showGeneration;
+  let session=sessionFromEvent;
+  if(typeof session==='undefined'){
+    const {data,error}=await client.auth.getSession();
+    if(generation!==showGeneration)return;
+    if(error){login.hidden=false;consent.hidden=true;setStatus(error.message);return}
+    session=data.session;
+  }
+  if(!session){
+    login.hidden=false;
+    consent.hidden=true;
+    setStatus(callbackError||(callbackAttempted?'Sign-in did not complete in this tab. Close other Open Brain authorization tabs, then request one new link.':''));
+    return;
+  }
   if(!authorizationId){login.hidden=true;consent.hidden=true;setStatus('Missing authorization request. Return to the app and start the connection again.');return}
+  login.hidden=true;
+  consent.hidden=true;
+  setStatus('Finishing sign-in...');
   const {data,error}=await client.auth.oauth.getAuthorizationDetails(authorizationId);
+  if(generation!==showGeneration)return;
   if(error||!data){setStatus(error?.message||'Invalid authorization request.');return}
   if(!('authorization_id' in data)&&data.redirect_url){location.assign(data.redirect_url);return}
   login.hidden=true;consent.hidden=false;
+  setStatus('');
   document.querySelector('#client-name').textContent=data.client?.name||'Approved AI client';
   document.querySelector('#redirect-uri').textContent=data.redirect_uri||'';
-  document.querySelector('#scope').textContent=data.scope||'email';
+  document.querySelector('#scope').textContent=Array.isArray(data.scopes)?data.scopes.join(', '):(data.scope||'email');
 }
 document.querySelector('#send-link').addEventListener('click',async()=>{
   const email=document.querySelector('#email').value.trim();
   if(!email){setStatus('Enter the approved email address.');return}
   setStatus('Sending secure sign-in link...');
-  const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:location.href}});
+  const redirectTo=location.origin+location.pathname+location.search;
+  const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:redirectTo}});
   setStatus(error?error.message:'Check your email and open the sign-in link in this browser.');
 });
 document.querySelector('#approve').addEventListener('click',async()=>{
@@ -79,7 +101,16 @@ document.querySelector('#deny').addEventListener('click',async()=>{
   location.assign(data.redirect_url);
 });
 document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
-client.auth.onAuthStateChange(()=>setTimeout(show,0));
+client.auth.onAuthStateChange((event,session)=>{
+  if(session){
+    login.hidden=true;
+    consent.hidden=true;
+    setStatus('Finishing sign-in...');
+    setTimeout(()=>void show(session),0);
+  }else if(event==='SIGNED_OUT'){
+    setTimeout(()=>void show(null),0);
+  }
+});
 await show();
 </script>
 </body>

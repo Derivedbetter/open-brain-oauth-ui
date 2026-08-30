@@ -25,31 +25,57 @@ function consentPage(anonKey: string) {
 <h1>Authorize Tony's Open Brain</h1>
 <p>This private consent screen grants an approved AI client access to Tony's shared operational memory. It is not Continuity, COTA, Current-State Tracker, or owner-acceptance authority.</p>
 <section id="login"><label class="label" for="email">Tony's approved email</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="actions"><button id="send-link">Send secure sign-in link</button></div></section>
-<section id="consent" hidden><div class="details"><div class="row"><span class="label">Application:</span> <span id="client-name"></span></div><div class="row"><span class="label">Redirect:</span> <span id="redirect-uri"></span></div><div class="row"><span class="label">Requested access:</span> <span id="scopes"></span></div></div><p>Approve only if you initiated this connection. Open Brain captures content only when you explicitly request a capture.</p><div class="actions"><button id="approve">Approve</button><button id="deny" class="secondary">Deny</button><button id="sign-out" class="secondary">Sign out</button></div></section>
+<section id="consent" hidden><div class="details"><div class="row"><span class="label">Application:</span> <span id="client-name"></span></div><div class="row"><span class="label">Redirect:</span> <span id="redirect-uri"></span></div><div class="row"><span class="label">Requested access:</span> <span id="scope"></span></div></div><p>Approve only if you initiated this connection. Open Brain captures content only when you explicitly request a capture.</p><div class="actions"><button id="approve">Approve</button><button id="deny" class="secondary">Deny</button><button id="sign-out" class="secondary">Sign out</button></div></section>
 <div id="status" class="status" role="status"></div><div class="links"><a href="${UI_URL}/privacy">Privacy</a><a href="${UI_URL}/terms">Terms</a></div>
 </main><script type="module">
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4/+esm';
+const callbackParams=new URLSearchParams(location.hash.slice(1));
+const callbackError=callbackParams.get('error_description')||callbackParams.get('error');
+const callbackAttempted=location.hash.length>1;
 const config=${publicConfig};
 const client=createClient(config.projectUrl,config.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const qs=new URLSearchParams(location.search); const authorizationId=qs.get('authorization_id');
 const login=document.querySelector('#login'), consent=document.querySelector('#consent'), status=document.querySelector('#status');
 function setStatus(message){status.textContent=message||''}
-async function show(){
-  const {data:{session}}=await client.auth.getSession();
-  if(!session){login.hidden=false;consent.hidden=true;return}
+let showGeneration=0;
+async function show(sessionFromEvent){
+  const generation=++showGeneration;
+  let session=sessionFromEvent;
+  if(typeof session==='undefined'){
+    const {data,error}=await client.auth.getSession();
+    if(generation!==showGeneration)return;
+    if(error){login.hidden=false;consent.hidden=true;setStatus(error.message);return}
+    session=data.session;
+  }
+  if(!session){
+    login.hidden=false;
+    consent.hidden=true;
+    setStatus(callbackError||(callbackAttempted?'Sign-in did not complete in this tab. Close other Open Brain authorization tabs, then request one new link.':''));
+    return;
+  }
   if(!authorizationId){login.hidden=true;consent.hidden=true;setStatus('Missing authorization request. Return to the app and start the connection again.');return}
+  login.hidden=true;
+  consent.hidden=true;
+  setStatus('Finishing sign-in...');
   const {data,error}=await client.auth.oauth.getAuthorizationDetails(authorizationId);
-  if(error){setStatus(error.message);return}
+  if(generation!==showGeneration)return;
+  if(error||!data){setStatus(error?.message||'Invalid authorization request.');return}
+  if(!('authorization_id' in data)&&data.redirect_url){location.assign(data.redirect_url);return}
   login.hidden=true;consent.hidden=false;
+  setStatus('');
   document.querySelector('#client-name').textContent=data.client?.name||data.client_name||'Approved AI client';
   document.querySelector('#redirect-uri').textContent=data.redirect_uri||'';
-  document.querySelector('#scopes').textContent=(data.scopes||[]).join(', ')||'email';
+  document.querySelector('#scope').textContent=Array.isArray(data.scopes)?data.scopes.join(', '):(data.scope||'email');
 }
-document.querySelector('#send-link').addEventListener('click',async()=>{const email=document.querySelector('#email').value.trim();if(!email){setStatus('Enter the approved email address.');return}setStatus('Sending secure sign-in link…');const redirectTo=location.href;const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:redirectTo}});setStatus(error?error.message:'Check your email and open the sign-in link in this browser.');});
+document.querySelector('#send-link').addEventListener('click',async()=>{const email=document.querySelector('#email').value.trim();if(!email){setStatus('Enter the approved email address.');return}setStatus('Sending secure sign-in link…');const redirectTo=location.origin+location.pathname+location.search;const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:redirectTo}});setStatus(error?error.message:'Check your email and open the sign-in link in this browser.');});
 document.querySelector('#approve').addEventListener('click',async()=>{setStatus('Approving…');const {data,error}=await client.auth.oauth.approveAuthorization(authorizationId);if(error){setStatus(error.message);return}location.assign(data.redirect_url);});
 document.querySelector('#deny').addEventListener('click',async()=>{setStatus('Denying…');const {data,error}=await client.auth.oauth.denyAuthorization(authorizationId);if(error){setStatus(error.message);return}location.assign(data.redirect_url);});
 document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
-client.auth.onAuthStateChange(()=>setTimeout(show,0)); await show();
+client.auth.onAuthStateChange((event,session)=>{
+  if(session){login.hidden=true;consent.hidden=true;setStatus('Finishing sign-in...');setTimeout(()=>void show(session),0)}
+  else if(event==='SIGNED_OUT'){setTimeout(()=>void show(null),0)}
+});
+await show();
 </script>`);
 }
 
