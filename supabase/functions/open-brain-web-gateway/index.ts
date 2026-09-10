@@ -10,6 +10,7 @@ import {
   normalizeContent,
   oauthClientAllowlist,
   parseMcpResponse,
+  projectEndpoints,
   requestForUpstream,
   readOnlyBlockedResponse,
   readOnlyRequestAllowed,
@@ -18,12 +19,10 @@ import {
   splitAllowlist,
 } from "./lib.mjs";
 
-const PROJECT_REF = "zoptbgumxukgpkgbtnpz";
-const PROJECT_URL = `https://${PROJECT_REF}.supabase.co`;
-const AUTH_ISSUER = `${PROJECT_URL}/auth/v1`;
-const GATEWAY_URL = `${PROJECT_URL}/functions/v1/open-brain-web-gateway`;
-const READ_ONLY_GATEWAY_URL = `${GATEWAY_URL}/readonly`;
-const UPSTREAM_URL = `${PROJECT_URL}/functions/v1/open-brain-mcp`;
+const {
+  projectUrl: PROJECT_URL, authIssuer: AUTH_ISSUER, gatewayUrl: GATEWAY_URL,
+  readOnlyGatewayUrl: READ_ONLY_GATEWAY_URL, upstreamUrl: UPSTREAM_URL,
+} = projectEndpoints(Deno.env.get("SUPABASE_URL"));
 const MAX_MESSAGE_BYTES = 1_048_576;
 const REQUEST_TIMEOUT_MS = 120_000;
 
@@ -74,13 +73,12 @@ async function authorize(request: Request, resourceUrl: string, readOnly: boolea
   if (!match) return { error: unauthorized(resourceUrl) };
 
   const token = match[1].trim();
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? PROJECT_URL;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   if (!anonKey) {
     return { error: unauthorized(resourceUrl, "Gateway authentication is not configured") };
   }
 
-  const supabase = createClient(supabaseUrl, anonKey, {
+  const supabase = createClient(PROJECT_URL, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const { data, error } = await supabase.auth.getUser(token);

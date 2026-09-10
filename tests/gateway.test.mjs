@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 
 import {
   appendCaptureEvidence,
@@ -11,6 +13,7 @@ import {
   isCaptureCall,
   oauthClientAllowlist,
   parseMcpResponse,
+  projectEndpoints,
   requestForUpstream,
   readOnlyBlockedResponse,
   readOnlyRequestAllowed,
@@ -23,6 +26,30 @@ function fakeJwt(payload) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none" })}.${encode(payload)}.`;
 }
+
+test("capture verification skips server-time blocks in search and fetch responses", async () => {
+  const source = readFileSync(new URL("../supabase/functions/open-brain-web-gateway/index.ts", import.meta.url), "utf8");
+  // Exercise the actual verification routine with an offline upstream fixture.
+  const routine = source.slice(source.indexOf("async function verifyCapture("), source.indexOf("\nDeno.serve("));
+  const thought = { id: "synthetic-capture-id", text: "Synthetic exact capture.", url: "https://example.test/thought" };
+  const calls = [];
+  const upstream = async (request) => {
+    calls.push(request.params.name);
+    const payload = request.params.name === "search" ? { results: [{ id: thought.id }] } : thought;
+    return { contentType: "application/json", sessionId: "synthetic-session", body: JSON.stringify({
+      result: { content: [
+        { type: "text", text: "Server time: 2026-09-07T16:50:00Z" },
+        { type: "text", text: JSON.stringify(payload) },
+      ] },
+    }) };
+  };
+  const verify = new Function("upstreamRequest", "parseMcpResponse", "resultJson", "normalizeContent",
+    stripTypeScriptTypes(routine) + "; return verifyCapture;")(upstream, parseMcpResponse, resultJson,
+      value => String(value).trim().replace(/\s+/g, " ").toLowerCase());
+  assert.deepEqual(await verify(thought.text, "exact", "synthetic-key"), thought);
+  assert.deepEqual(calls, ["search", "fetch"]);
+  assert.equal(resultJson([{ result: { content: [{ type: "text", text: "Server time only" }] } }]), null);
+});
 
 test("parses and serializes JSON and SSE MCP messages", () => {
   const json = parseMcpResponse("application/json", '{"id":1}');
@@ -84,6 +111,7 @@ test("maps exact and summary aliases to vanilla capture_thought", () => {
 
 test("decorates tools with exact payload and failure rules", () => {
   const closedWorldReadTools = [
+    "check_messages",
     "export_memory_changes",
     "fetch",
     "list_thoughts",
@@ -156,6 +184,38 @@ test("read-only route lists only bounded reads and blocks direct writes", () => 
       message: "Tool not available on the read-only Open Brain endpoint",
     },
   });
+});
+
+test("messaging passes through unchanged and only checking is allowed on read-only", () => {
+  const definitions = ["send_message", "check_messages", "consume_message"].map(name => ({
+    name, description: name, inputSchema: { type: "object" },
+    annotations: { readOnlyHint: name === "check_messages", idempotentHint: true },
+  }));
+  const tools = decorateToolList([{ result: { tools: structuredClone(definitions) } }])[0].result.tools;
+  assert.deepEqual(tools.map(t => t.name), definitions.map(t => t.name));
+  for (const tool of tools) {
+    const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+      name: tool.name, arguments: { message_id: "identity", recipient: "Mac", content: "body", after_message_id: "cursor" },
+    } };
+    assert.equal(requestForUpstream(request), request);
+    assert.equal(isCaptureCall(request), false);
+    assert.equal(readOnlyRequestAllowed(request), tool.name === "check_messages");
+    assert.equal(tool.annotations.readOnlyHint, tool.name === "check_messages");
+  }
+  assert.deepEqual(filterReadOnlyToolList([{ result: { tools } }])[0].result.tools.map(t => t.name), ["check_messages"]);
+});
+
+test("configured disposable project owns every endpoint; production default is unchanged", () => {
+  const defaults = projectEndpoints();
+  assert.equal(defaults.projectUrl, "https://zoptbgumxukgpkgbtnpz.supabase.co");
+  assert.equal(defaults.upstreamUrl, `${defaults.projectUrl}/functions/v1/open-brain-mcp`);
+  const isolated = projectEndpoints("https://bjchwflkqssrwwhztttz.supabase.co/");
+  for (const endpoint of Object.values(isolated)) {
+    assert.equal(new URL(endpoint).origin, "https://bjchwflkqssrwwhztttz.supabase.co");
+    assert(!endpoint.includes("zoptbgumxukgpkgbtnpz"));
+  }
+  for (const invalid of ["", "http://example.com", "https://user:pass@example.com", "https://example.com/path", "https://example.com/?query=1"])
+    assert.throws(() => projectEndpoints(invalid));
 });
 
 test("returns authoritative evidence or explicit verification failure", () => {

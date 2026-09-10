@@ -5,6 +5,7 @@ const CAPTURE_TOOLS = new Set([
 ]);
 
 const CLOSED_WORLD_READ_TOOLS = new Set([
+  "check_messages",
   "export_memory_changes",
   "fetch",
   "list_thoughts",
@@ -13,6 +14,23 @@ const CLOSED_WORLD_READ_TOOLS = new Set([
   "search_thoughts",
   "thought_stats",
 ]);
+
+// Use the provider's existing deployment configuration for every endpoint.
+// The fallback preserves existing production deployments without an override.
+export function projectEndpoints(supabaseUrl = "https://zoptbgumxukgpkgbtnpz.supabase.co") {
+  const url = new URL(supabaseUrl);
+  if (url.protocol !== "https:" || url.username || url.password ||
+      url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
+    throw new Error("SUPABASE_URL must be an HTTPS project origin");
+  }
+  const projectUrl = url.origin;
+  const gatewayUrl = `${projectUrl}/functions/v1/open-brain-web-gateway`;
+  return {
+    projectUrl, authIssuer: `${projectUrl}/auth/v1`, gatewayUrl,
+    readOnlyGatewayUrl: `${gatewayUrl}/readonly`,
+    upstreamUrl: `${projectUrl}/functions/v1/open-brain-mcp`,
+  };
+}
 
 export function isReadOnlyTool(name) {
   return CLOSED_WORLD_READ_TOOLS.has(name);
