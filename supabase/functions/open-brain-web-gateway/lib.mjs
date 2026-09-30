@@ -125,7 +125,7 @@ function commonCaptureDescription() {
     "The content argument must contain only the memory to store, never the user's surrounding save instruction.",
     "Use the gateway's verified storage evidence and authoritative ID in the reply.",
     "If verification is unavailable, report failure instead of improvising.",
-    "Capture only when the user explicitly asks; never capture a transcript automatically.",
+    "Capture only under an explicit user request or applicable standing owner capture instructions; never capture a transcript automatically. Standing instructions can cover meaningful ideas, corrections and changes to how we work; do not capture routine status merely because it was said. Preserve required exact wording, privacy exclusions and source provenance; never store secrets or present agent inference as an owner statement.",
   ].join(" ");
 }
 
@@ -152,7 +152,7 @@ export function decorateToolList(messages) {
         title: "Capture exact Open Brain memory",
         description: [
           "Capture an exact Open Brain memory.",
-          "Copy only the text inside the user's explicit delimiters into content, excluding the delimiters, and preserve it literally without additions, deletions, summarization, or reformatting.",
+          "Copy only the source text authorized for exact capture into content, excluding surrounding save instructions and any delimiters, and preserve it literally without additions, deletions, summarization, or reformatting.",
           commonCaptureDescription(),
         ].join(" "),
       },
@@ -161,7 +161,7 @@ export function decorateToolList(messages) {
         title: "Capture Open Brain summary",
         description: [
           "Capture a concise standalone Open Brain summary.",
-          "Summarize only the material the user selected; omit capture commands, conversational filler, and unverified claims.",
+          "Summarize only material authorized for summary capture; omit capture commands, conversational filler, and unverified claims. Do not use this alias when the applicable capture instructions require exact wording.",
           commonCaptureDescription(),
         ].join(" "),
       },

@@ -5,7 +5,7 @@ OAuth-protected remote MCP gateway for Tony's Gemini Spark and Perplexity web cl
 ## Boundaries
 
 - Open Brain is operational memory, not Continuity, COTA, Current-State Tracker, or owner-acceptance authority.
-- No automatic chat capture. Capture tools are for explicit requests only.
+- No automatic chat capture. Capture tools require an explicit request or applicable standing owner capture instructions. Standing instructions do not authorize passive transcript capture; preserve required exact wording, privacy exclusions and source provenance.
 - The vanilla Open Brain repository and Edge Function remain unchanged.
 - Browser clients receive short-lived OAuth tokens, never the long-lived Open Brain access key.
 - OAuth tokens are validated and then terminated at this gateway; they are not passed to the upstream Open Brain.

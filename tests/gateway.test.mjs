@@ -155,7 +155,14 @@ test("decorates tools with exact payload and failure rules", () => {
   assert.equal(tools.find((tool) => tool.name === "capture_thought").annotations.openWorldHint, false);
   assert.match(tools.find((tool) => tool.name === "capture_thought_exact").description, /preserve it literally/);
   assert.match(tools.find((tool) => tool.name === "capture_thought_summary").description, /report failure instead of improvising/);
-  assert.match(tools.find((tool) => tool.name === "capture_thought").description, /never capture a transcript automatically/);
+  for (const name of ["capture_thought", "capture_thought_exact", "capture_thought_summary"]) {
+    const description = tools.find((tool) => tool.name === name).description;
+    assert.match(description, /explicit user request or applicable standing owner capture instructions/);
+    assert.match(description, /never capture a transcript automatically/);
+    assert.match(description, /privacy exclusions and source provenance/);
+    assert.doesNotMatch(description, /only when the user explicitly asks/);
+  }
+  assert.match(tools.find((tool) => tool.name === "capture_thought_summary").description, /Do not use this alias.*require exact wording/);
 });
 
 test("read-only route lists only bounded reads and blocks direct writes", () => {
