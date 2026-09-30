@@ -72,7 +72,16 @@ async function show(sessionFromEvent){
   setStatus('Finishing sign-in...');
   const {data,error}=await client.auth.oauth.getAuthorizationDetails(authorizationId);
   if(generation!==showGeneration)return;
-  if(error||!data){setStatus(error?.message||'Invalid authorization request.');return}
+  if(error||!data){
+    if(error?.name==='AuthSessionMissingError'||/^Auth session missing!?$/i.test(error?.message||'')){
+      login.hidden=false;
+      consent.hidden=true;
+      setStatus('Sign in to Open Brain to continue. Enter your approved email to request a new sign-in link.');
+    }else{
+      setStatus(error?.message||'Invalid authorization request.');
+    }
+    return;
+  }
   if(!('authorization_id' in data)&&data.redirect_url){location.assign(data.redirect_url);return}
   login.hidden=true;consent.hidden=false;
   setStatus('');

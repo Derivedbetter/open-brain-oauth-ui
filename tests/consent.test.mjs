@@ -15,7 +15,7 @@ function element(overrides = {}) {
   };
 }
 
-async function consentHarness({ hash = "", initialSession = null } = {}) {
+async function consentHarness({ hash = "", initialSession = null, detailsError = null } = {}) {
   const html = await readFile(staticConsentPath, "utf8");
   const moduleScript = html.match(/<script type="module">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(moduleScript, "consent module script is present");
@@ -57,17 +57,20 @@ async function consentHarness({ hash = "", initialSession = null } = {}) {
   };
   let authStateHandler;
   let authorizationDetailCalls = 0;
+  let signInCalls = 0;
+  let approveCalls = 0;
   const auth = {
     async getSession() { return { data: { session: initialSession }, error: null }; },
     onAuthStateChange(handler) {
       authStateHandler = handler;
       return { data: { subscription: { unsubscribe() {} } } };
     },
-    async signInWithOtp() { return { error: null }; },
+    async signInWithOtp() { signInCalls += 1; return { error: null }; },
     async signOut() {},
     oauth: {
       async getAuthorizationDetails() {
         authorizationDetailCalls += 1;
+        if(detailsError) return {data:null,error:detailsError};
         return {
           data: {
             authorization_id: "request-1",
@@ -78,7 +81,7 @@ async function consentHarness({ hash = "", initialSession = null } = {}) {
           error: null,
         };
       },
-      async approveAuthorization() { return { data: { redirect_url: "https://example.test/approved" }, error: null }; },
+      async approveAuthorization() { approveCalls += 1; return { data: { redirect_url: "https://example.test/approved" }, error: null }; },
       async denyAuthorization() { return { data: { redirect_url: "https://example.test/denied" }, error: null }; },
     },
   };
@@ -99,8 +102,31 @@ async function consentHarness({ hash = "", initialSession = null } = {}) {
     location,
     timers,
     authorizationDetailCalls: () => authorizationDetailCalls,
+    signInCalls: () => signInCalls,
+    approveCalls: () => approveCalls,
   };
 }
+
+test("missing server auth session restores email entry without signing in or granting consent", async () => {
+  for(const detailsError of [{name:'AuthSessionMissingError',message:'Auth session missing!'}, {message:'Auth session missing!'}]){
+    const harness=await consentHarness({initialSession:{access_token:'fixture-only'},detailsError});
+    assert.equal(harness.authorizationDetailCalls(),1);
+    assert.equal(harness.elements.get('#login').hidden,false);
+    assert.equal(harness.elements.get('#consent').hidden,true);
+    assert.match(harness.elements.get('#status').textContent,/Enter your approved email/);
+    assert.equal(harness.signInCalls(),0);
+    assert.equal(harness.approveCalls(),0);
+    assert.equal(harness.location.assigned,null);
+  }
+});
+
+test("an unrelated authorization error is preserved without suggesting a sign-in repair", async () => {
+  const harness=await consentHarness({initialSession:{access_token:'fixture-only'},detailsError:{message:'Authorization request expired'}});
+  assert.equal(harness.elements.get('#status').textContent,'Authorization request expired');
+  assert.equal(harness.elements.get('#login').hidden,true);
+  assert.equal(harness.elements.get('#consent').hidden,true);
+  assert.equal(harness.approveCalls(),0);
+});
 
 test("uses the callback auth event session instead of falling back to an empty store", async () => {
   const harness = await consentHarness();
