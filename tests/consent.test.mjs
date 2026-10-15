@@ -10,16 +10,17 @@ function element(overrides = {}) {
     hidden: false,
     textContent: "",
     value: "",
-    addEventListener() {},
+    handlers: {},
+    addEventListener(type, handler) { this.handlers[type] = handler; },
     ...overrides,
   };
 }
 
-async function consentHarness({ hash = "", initialSession = null, detailsError = null } = {}) {
-  const html = await readFile(staticConsentPath, "utf8");
+async function consentHarness({ hash = "", initialSession = null, detailsError = null, adoptionError = null, broadcastOnAdoption = false, surface = staticConsentPath } = {}) {
+  const html = await readFile(surface, "utf8");
   const moduleScript = html.match(/<script type="module">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(moduleScript, "consent module script is present");
-  const executableScript = moduleScript.replace(/^import .*?;\s*/m, "");
+  const executableScript = moduleScript.replace(/^import .*?;\s*/m, "").replace("${publicConfig}", "{}");
 
   const elements = new Map([
     ["#login", element()],
@@ -59,8 +60,17 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
   let authorizationDetailCalls = 0;
   let signInCalls = 0;
   let approveCalls = 0;
+  let setSessionCalls = 0;
+  let storedSession = initialSession;
   const auth = {
-    async getSession() { return { data: { session: initialSession }, error: null }; },
+    async getSession() { return { data: { session: storedSession }, error: null }; },
+    async setSession(session) {
+      setSessionCalls += 1;
+      if(adoptionError) return {data:{session:null},error:adoptionError};
+      storedSession = session;
+      if(broadcastOnAdoption) authStateHandler("SIGNED_IN", session);
+      return {data:{session},error:null};
+    },
     onAuthStateChange(handler) {
       authStateHandler = handler;
       return { data: { subscription: { unsubscribe() {} } } };
@@ -104,6 +114,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
     authorizationDetailCalls: () => authorizationDetailCalls,
     signInCalls: () => signInCalls,
     approveCalls: () => approveCalls,
+    setSessionCalls: () => setSessionCalls,
   };
 }
 
@@ -133,7 +144,7 @@ test("uses the callback auth event session instead of falling back to an empty s
   assert.equal(harness.authorizationDetailCalls(), 0);
   assert.equal(harness.elements.get("#login").hidden, false);
 
-  harness.authStateHandler("SIGNED_IN", { access_token: "verified-session" });
+  harness.authStateHandler("SIGNED_IN", { access_token: "verified-session", refresh_token: "fixture-refresh" });
   assert.equal(harness.elements.get("#status").textContent, "Finishing sign-in...");
   assert.equal(harness.timers.length, 1);
   harness.timers.shift()();
@@ -177,3 +188,43 @@ test("pins the browser auth dependency and keeps both consent surfaces on the ca
     assert.match(source, /location\.origin\+location\.pathname\+location\.search/);
   }
 });
+
+for(const surface of [staticConsentPath,edgeConsentPath]){
+  const label=surface===staticConsentPath?'static':'edge';
+  test(`${label}: event session is adopted once even when adoption emits another auth event`,async()=>{
+    const h=await consentHarness({surface,broadcastOnAdoption:true});
+    h.authStateHandler('SIGNED_IN',{access_token:'fixture-access',refresh_token:'fixture-refresh'});
+    let turns=0;
+    while(h.timers.length&&turns++<10){h.timers.shift()();await new Promise(r=>setImmediate(r));}
+    assert.ok(turns<10,'auth events must settle');
+    assert.equal(h.setSessionCalls(),1);
+    assert.equal(h.elements.get('#consent').hidden,false);
+    assert.equal(h.approveCalls(),0);
+    assert.equal(h.location.assigned,null);
+    await h.elements.get('#approve').handlers.click();
+    assert.equal(h.approveCalls(),1);
+    assert.equal(h.location.assigned,'https://example.test/approved');
+  });
+  test(`${label}: stored sessions need no adoption`,async()=>{
+    const h=await consentHarness({surface,initialSession:{access_token:'fixture-stored'}});
+    h.authStateHandler('SIGNED_IN',{access_token:'fixture-event',refresh_token:'fixture-refresh'});
+    h.timers.shift()();await new Promise(r=>setImmediate(r));
+    assert.equal(h.setSessionCalls(),0);
+    assert.equal(h.elements.get('#consent').hidden,false);
+    assert.equal(h.approveCalls(),0);
+  });
+  test(`${label}: rejected event adoption remains a sign-in error without looping`,async()=>{
+    const h=await consentHarness({surface,adoptionError:{message:'Session could not be verified'}});
+    for(let i=0;i<2;i++){
+      h.authStateHandler('SIGNED_IN',{access_token:'fixture-access',refresh_token:'fixture-refresh'});
+      h.timers.shift()();await new Promise(r=>setImmediate(r));
+    }
+    assert.equal(h.setSessionCalls(),1);
+    assert.equal(h.authorizationDetailCalls(),0);
+    assert.equal(h.elements.get('#login').hidden,false);
+    assert.equal(h.elements.get('#consent').hidden,true);
+    assert.equal(h.elements.get('#status').textContent,'Session could not be verified');
+    assert.equal(h.approveCalls(),0);
+    assert.equal(h.location.assigned,null);
+  });
+}

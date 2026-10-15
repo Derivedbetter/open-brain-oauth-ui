@@ -38,14 +38,24 @@ const qs=new URLSearchParams(location.search); const authorizationId=qs.get('aut
 const login=document.querySelector('#login'), consent=document.querySelector('#consent'), status=document.querySelector('#status');
 function setStatus(message){status.textContent=message||''}
 let showGeneration=0;
+let eventSessionAdoption;
 async function show(sessionFromEvent){
   const generation=++showGeneration;
   let session=sessionFromEvent;
-  if(typeof session==='undefined'){
+  if(typeof session==='undefined'||session){
     const {data,error}=await client.auth.getSession();
     if(generation!==showGeneration)return;
     if(error){login.hidden=false;consent.hidden=true;setStatus(error.message);return}
     session=data.session;
+    // Broadcast auth events can reach a tab whose SDK uses separate memory storage.
+    // Adopt that verified event through the public API once before OAuth rereads storage.
+    if(!session&&sessionFromEvent){
+      eventSessionAdoption??=client.auth.setSession({access_token:sessionFromEvent.access_token,refresh_token:sessionFromEvent.refresh_token});
+      const adopted=await eventSessionAdoption;
+      if(generation!==showGeneration)return;
+      if(adopted.error){login.hidden=false;consent.hidden=true;setStatus(adopted.error.message);return}
+      session=adopted.data.session;
+    }
   }
   if(!session){
     login.hidden=false;
