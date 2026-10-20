@@ -13,7 +13,7 @@ OAuth-protected remote MCP gateway for Tony's Gemini Spark and Perplexity web cl
 ## Components
 
 - `open-brain-web-gateway`: OAuth-protected Streamable HTTP MCP relay with client/user allowlists, exact and summary aliases, authoritative post-write receipts, and a server-enforced `/readonly` route that exposes only the seven bounded read tools.
-- `docs/`: GitHub Pages email-link sign-in and OAuth consent UI, plus privacy and terms pages.
+- `docs/`: GitHub Pages same-page email-code sign-in and OAuth consent UI, plus privacy and terms pages.
 - `open-brain-oauth-ui`: deployable source retained as a fallback for a future custom Supabase domain; the default Supabase Functions domain intentionally rewrites HTML to plain text.
 
 ## Required live configuration
@@ -51,3 +51,15 @@ Test discovery and unauthenticated failure before connecting a client:
 ## Rollback
 
 Revoke the affected OAuth client, disable the connector in Gemini or Perplexity, disable Supabase OAuth Server if no clients remain, and delete only the two gateway Edge Functions. Existing Open Brain data and the ChatGPT, Codex, and `agy` integrations remain unchanged.
+
+## Same-page six-digit email sign-in
+
+The consent page calls `signInWithOtp({email, options:{shouldCreateUser:false}})`, then `verifyOtp({email, token, type:'email'})` in the same tab. `authorization_id` stays in that tab's URL; successful sign-in reveals the existing consent screen, and only Approve redirects to the OAuth client. Existing gateway user/client allowlists are unchanged.
+
+**Required hosted email template change:** a project owner/admin must open Supabase Dashboard → the Open Brain project → Authentication → Email Templates → Magic Link. Replace its body with `supabase/templates/magic_link.html`, which includes `{{ .Token }}` instead of a confirmation link. Suggested subject: `Your Open Brain sign-in code`. Save the template. This is hosted Auth configuration; deploying the page does not apply it. The builder supplies the exact template; the existing deployment owner applies it after release, or Tony applies these exact dashboard steps. No credentials belong in the template. Do not request Tony's retry until that setting and the page are verified.
+
+The approved existing email account must already exist; sign-up remains disabled for code requests. The default resend interval is controlled by Supabase (normally 60 seconds). Invalid/expired codes show an error and grant no consent. Codes and sessions are not logged. The email remains fixed after a successful send so verification cannot accidentally use another address; reload the same authorization URL to change it.
+
+**Single retry, once both page/template and Bee's MCP-header gateway fix are ready:** start Connect again from ChatGPT's existing Open Brain connection, enter the approved email, click Send six-digit code, read the newest email, type its six digits into the SAME authorization page, click Verify code, review the requested client/access, and click Approve. Do not open a magic link or copy the authorization URL into another tab. A stale request should be restarted from ChatGPT, not repaired by changing its authorization ID.
+
+Mock verification runs the actual module script from both static and fallback Edge consent surfaces with synthetic OTP/session and authorization details; no real email is sent. A mock PASS does not prove hosted email delivery or template state.

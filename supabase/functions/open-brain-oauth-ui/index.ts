@@ -24,7 +24,11 @@ function consentPage(anonKey: string) {
   return page("Authorize Open Brain", `<main class="card">
 <h1>Authorize Tony's Open Brain</h1>
 <p>This private consent screen grants an approved AI client access to Tony's shared operational memory. It is not Continuity, COTA, Current-State Tracker, or owner-acceptance authority.</p>
-<section id="login"><label class="label" for="email">Tony's approved email</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="actions"><button id="send-link">Send secure sign-in link</button></div></section>
+<section id="login"><label class="label" for="email">Tony's approved email</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"><div class="actions"><button id="send-code">Send six-digit code</button></div><div id="code-entry" hidden>
+      <label class="label" for="code">Six-digit email code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456">
+      <div class="actions"><button id="verify-code">Verify code</button></div>
+    </div></section>
 <section id="consent" hidden><div class="details"><div class="row"><span class="label">Application:</span> <span id="client-name"></span></div><div class="row"><span class="label">Redirect:</span> <span id="redirect-uri"></span></div><div class="row"><span class="label">Requested access:</span> <span id="scope"></span></div></div><p>Approve only if you initiated this connection. Open Brain captures content only when you explicitly request a capture.</p><div class="actions"><button id="approve">Approve</button><button id="deny" class="secondary">Deny</button><button id="sign-out" class="secondary">Sign out</button></div></section>
 <div id="status" class="status" role="status"></div><div class="links"><a href="${UI_URL}/privacy">Privacy</a><a href="${UI_URL}/terms">Terms</a></div>
 </main><script type="module">
@@ -60,7 +64,7 @@ async function show(sessionFromEvent){
   if(!session){
     login.hidden=false;
     consent.hidden=true;
-    setStatus(callbackError||(callbackAttempted?'Sign-in did not complete in this tab. Close other Open Brain authorization tabs, then request one new link.':''));
+    setStatus(callbackError||(callbackAttempted?'Sign-in did not complete in this tab. Close other Open Brain authorization tabs, then request a new code.':''));
     return;
   }
   if(!authorizationId){login.hidden=true;consent.hidden=true;setStatus('Missing authorization request. Return to the app and start the connection again.');return}
@@ -77,7 +81,43 @@ async function show(sessionFromEvent){
   document.querySelector('#redirect-uri').textContent=data.redirect_uri||'';
   document.querySelector('#scope').textContent=Array.isArray(data.scopes)?data.scopes.join(', '):(data.scope||'email');
 }
-document.querySelector('#send-link').addEventListener('click',async()=>{const email=document.querySelector('#email').value.trim();if(!email){setStatus('Enter the approved email address.');return}setStatus('Sending secure sign-in link…');const redirectTo=location.origin+location.pathname+location.search;const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:redirectTo}});setStatus(error?error.message:'Check your email and open the sign-in link in this browser.');});
+let otpEmail=null;
+let otpBusy=false;
+document.querySelector('#send-code').addEventListener('click',async()=>{
+  if(otpBusy)return;
+  const email=document.querySelector('#email').value.trim();
+  if(!authorizationId){setStatus('Missing authorization request. Return to the app and start the connection again.');return}
+  if(!email){setStatus('Enter the approved email address.');return}
+  otpBusy=true;
+  document.querySelector('#send-code').disabled=true;
+  setStatus('Sending six-digit sign-in code...');
+  try{
+    const {error}=await client.auth.signInWithOtp({email,options:{shouldCreateUser:false}});
+    if(error){setStatus(error.message);return}
+    otpEmail=email;
+    document.querySelector('#email').readOnly=true;
+    document.querySelector('#code-entry').hidden=false;
+    document.querySelector('#code').value='';
+    setStatus('Check your email for the six-digit code. Enter it here, in this same page.');
+  }catch{setStatus('Could not send the code. Check your connection and try again.')}
+  finally{otpBusy=false;document.querySelector('#send-code').disabled=false}
+});
+document.querySelector('#verify-code').addEventListener('click',async()=>{
+  if(otpBusy)return;
+  const token=document.querySelector('#code').value.trim();
+  if(!otpEmail||!/^[0-9]{6}$/.test(token)){setStatus('Enter the six-digit code from your email.');return}
+  otpBusy=true;
+  document.querySelector('#verify-code').disabled=true;
+  setStatus('Verifying sign-in code...');
+  try{
+    const {data,error}=await client.auth.verifyOtp({email:otpEmail,token,type:'email'});
+    if(error){setStatus(error.message);return}
+    if(!data?.session){setStatus('Sign-in did not complete. Request a new code.');return}
+    document.querySelector('#code').value='';
+    await show(data.session);
+  }catch{setStatus('Could not verify the code. Check your connection and try again.')}
+  finally{otpBusy=false;document.querySelector('#verify-code').disabled=false}
+});
 document.querySelector('#approve').addEventListener('click',async()=>{setStatus('Approving…');const {data,error}=await client.auth.oauth.approveAuthorization(authorizationId);if(error){setStatus(error.message);return}location.assign(data.redirect_url);});
 document.querySelector('#deny').addEventListener('click',async()=>{setStatus('Denying…');const {data,error}=await client.auth.oauth.denyAuthorization(authorizationId);if(error){setStatus(error.message);return}location.assign(data.redirect_url);});
 document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
