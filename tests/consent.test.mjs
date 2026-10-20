@@ -262,9 +262,9 @@ for (const surface of [staticConsentPath, edgeConsentPath]) {
     assert.equal(h.location.assigned,null);
     assert.equal(h.authorizationDetailCalls(),0);
     h.elements.get('#email').value='different@example.test'; // verify binds the successful send
-    h.elements.get('#code').value='123456';
+    h.elements.get('#code').value='12345678';
     await h.elements.get('#verify-code').handlers.click();
-    assert.deepEqual(h.verified,[{email:'owner@example.test',token:'123456',type:'email'}]);
+    assert.deepEqual(h.verified,[{email:'owner@example.test',token:'12345678',type:'email'}]);
     assert.equal(h.elements.get('#login').hidden,true);
     assert.equal(h.elements.get('#consent').hidden,false);
     assert.deepEqual(h.detailIds,['request-1']);
@@ -279,10 +279,12 @@ for (const surface of [staticConsentPath, edgeConsentPath]) {
     const h=await consentHarness({surface,verifyError:{message:'Token has expired'}});
     h.elements.get('#email').value='owner@example.test';
     await h.elements.get('#send-code').handlers.click();
-    h.elements.get('#code').value='12a456';
-    await h.elements.get('#verify-code').handlers.click();
-    assert.equal(h.verified.length,0);
-    h.elements.get('#code').value='654321';
+    for(const invalid of ['123456','123456789','12a45678']){
+      h.elements.get('#code').value=invalid;
+      await h.elements.get('#verify-code').handlers.click();
+      assert.equal(h.verified.length,0);
+    }
+    h.elements.get('#code').value='87654321';
     await h.elements.get('#verify-code').handlers.click();
     assert.equal(h.verified.length,1);
     assert.equal(h.elements.get('#status').textContent,'Token has expired');
@@ -298,7 +300,7 @@ for (const surface of [staticConsentPath, edgeConsentPath]) {
     await h.elements.get('#send-code').handlers.click();
     assert.equal(h.elements.get('#code-entry').hidden,true);
     assert.match(h.elements.get('#status').textContent,/60 seconds/);
-    h.elements.get('#code').value='123456';
+    h.elements.get('#code').value='12345678';
     await h.elements.get('#verify-code').handlers.click();
     assert.equal(h.verified.length,0);
     const absent=await consentHarness({surface,missingAuthorization:true});

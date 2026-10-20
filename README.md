@@ -52,7 +52,7 @@ Test discovery and unauthenticated failure before connecting a client:
 
 Revoke the affected OAuth client, disable the connector in Gemini or Perplexity, disable Supabase OAuth Server if no clients remain, and delete only the two gateway Edge Functions. Existing Open Brain data and the ChatGPT, Codex, and `agy` integrations remain unchanged.
 
-## Same-page six-digit email sign-in
+## Same-page eight-digit email sign-in
 
 The consent page calls `signInWithOtp({email, options:{shouldCreateUser:false}})`, then `verifyOtp({email, token, type:'email'})` in the same tab. `authorization_id` stays in that tab's URL; successful sign-in reveals the existing consent screen, and only Approve redirects to the OAuth client. Existing gateway user/client allowlists are unchanged.
 
@@ -60,6 +60,8 @@ The consent page calls `signInWithOtp({email, options:{shouldCreateUser:false}})
 
 The approved existing email account must already exist; sign-up remains disabled for code requests. The default resend interval is controlled by Supabase (normally 60 seconds). Invalid/expired codes show an error and grant no consent. Codes and sessions are not logged. The email remains fixed after a successful send so verification cannot accidentally use another address; reload the same authorization URL to change it.
 
-**Single retry, once both page/template and Bee's MCP-header gateway fix are ready:** start Connect again from ChatGPT's existing Open Brain connection, enter the approved email, click Send six-digit code, read the newest email, type its six digits into the SAME authorization page, click Verify code, review the requested client/access, and click Approve. Do not open a magic link or copy the authorization URL into another tab. A stale request should be restarted from ChatGPT, not repaired by changing its authorization ID.
+**Single retry, once both page/template and Bee's MCP-header gateway fix are ready:** start Connect again from ChatGPT's existing Open Brain connection, enter the approved email, click Send eight-digit code, read the newest email, type its eight digits into the SAME authorization page, click Verify code, review the requested client/access, and click Approve. Do not open a magic link or copy the authorization URL into another tab. A stale request should be restarted from ChatGPT, not repaired by changing its authorization ID.
 
 Mock verification runs the actual module script from both static and fallback Edge consent surfaces with synthetic OTP/session and authorization details; no real email is sent. A mock PASS does not prove hosted email delivery or template state.
+
+Hosted Auth readback on 2026-10-20 confirms `auth.email.otp_length = 8`. Both UI surfaces validate exactly eight digits. The approved implementation follows that existing setting; do not change Auth configuration to six digits.
