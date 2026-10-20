@@ -37,7 +37,7 @@ const callbackParams=new URLSearchParams(location.hash.slice(1));
 const callbackError=callbackParams.get('error_description')||callbackParams.get('error');
 const callbackAttempted=location.hash.length>1;
 const config=${publicConfig};
-const client=createClient(config.projectUrl,config.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const client=createClient(config.projectUrl,config.anonKey,{auth:{persistSession:false,autoRefreshToken:true,detectSessionInUrl:true}});
 const qs=new URLSearchParams(location.search); const authorizationId=qs.get('authorization_id');
 const login=document.querySelector('#login'), consent=document.querySelector('#consent'), status=document.querySelector('#status');
 function setStatus(message){status.textContent=message||''}

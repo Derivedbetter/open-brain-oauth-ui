@@ -47,7 +47,7 @@ const callbackAttempted=location.hash.length>1;
 const client=createClient(
   'https://zoptbgumxukgpkgbtnpz.supabase.co',
   'sb_publishable_PxKBCqRWmTJpBi6cudSsxg_Mgiut8sp',
-  {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}
+  {auth:{persistSession:false,autoRefreshToken:true,detectSessionInUrl:true}}
 );
 const authorizationId=new URLSearchParams(location.search).get('authorization_id');
 const login=document.querySelector('#login');
