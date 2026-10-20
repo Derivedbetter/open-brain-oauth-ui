@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { stripTypeScriptTypes } from "node:module";
+import { runInNewContext } from "node:vm";
 
 const staticConsentPath = new URL("../docs/oauth/consent/index.html", import.meta.url);
 const edgeConsentPath = new URL("../supabase/functions/open-brain-oauth-ui/index.ts", import.meta.url);
@@ -16,8 +18,16 @@ function element(overrides = {}) {
   };
 }
 
-async function consentHarness({ hash = "", initialSession = null, detailsError = null, adoptionError = null, broadcastOnAdoption = false, surface = staticConsentPath } = {}) {
-  const html = await readFile(surface, "utf8");
+async function consentHarness({ hash = "", initialSession = null, detailsError = null, adoptionError = null, broadcastOnAdoption = false, surface = staticConsentPath, sendError = null, verifyError = null, missingAuthorization = false } = {}) {
+  let html = await readFile(surface, "utf8");
+  if(surface === edgeConsentPath){
+    let handler;
+    runInNewContext(stripTypeScriptTypes(html),{
+      Response, URL,
+      Deno:{env:{get:()=> 'fixture-public-key'},serve:(fn)=>{handler=fn}},
+    });
+    html=await handler(new Request('https://fixture.test/oauth/consent?authorization_id=request-1')).text();
+  }
   const moduleScript = html.match(/<script type="module">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(moduleScript, "consent module script is present");
   const executableScript = moduleScript.replace(/^import .*?;\s*/m, "").replace("${publicConfig}", "{}");
@@ -27,7 +37,10 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
     ["#consent", element({ hidden: true })],
     ["#status", element()],
     ["#email", element()],
-    ["#send-link", element()],
+    ["#send-code", element()],
+    ["#code-entry", element({hidden:true})],
+    ["#code", element()],
+    ["#verify-code", element()],
     ["#approve", element()],
     ["#deny", element()],
     ["#sign-out", element()],
@@ -45,7 +58,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
   const location = {
     origin: "https://derivedbetter.github.io",
     pathname: "/open-brain-oauth-ui/oauth/consent/",
-    search: "?authorization_id=request-1",
+    search: missingAuthorization ? "" : "?authorization_id=request-1",
     hash,
     assigned: null,
     assign(url) { this.assigned = url; },
@@ -62,6 +75,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
   let approveCalls = 0;
   let setSessionCalls = 0;
   let storedSession = initialSession;
+  const sent = [], verified = [], detailIds = [], approvedIds = [];
   const auth = {
     async getSession() { return { data: { session: storedSession }, error: null }; },
     async setSession(session) {
@@ -75,10 +89,17 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
       authStateHandler = handler;
       return { data: { subscription: { unsubscribe() {} } } };
     },
-    async signInWithOtp() { signInCalls += 1; return { error: null }; },
+    async signInWithOtp(args) { signInCalls += 1; sent.push(args); return {error:sendError}; },
+    async verifyOtp(args) {
+      verified.push(args);
+      if(verifyError)return {data:{session:null},error:verifyError};
+      storedSession={access_token:'synthetic-otp-session',refresh_token:'synthetic-refresh'};
+      return {data:{session:storedSession},error:null};
+    },
     async signOut() {},
     oauth: {
-      async getAuthorizationDetails() {
+      async getAuthorizationDetails(id) {
+        detailIds.push(id);
         authorizationDetailCalls += 1;
         if(detailsError) return {data:null,error:detailsError};
         return {
@@ -91,7 +112,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
           error: null,
         };
       },
-      async approveAuthorization() { approveCalls += 1; return { data: { redirect_url: "https://example.test/approved" }, error: null }; },
+      async approveAuthorization(id) { approvedIds.push(id); approveCalls += 1; return { data: { redirect_url: "https://example.test/approved" }, error: null }; },
       async denyAuthorization() { return { data: { redirect_url: "https://example.test/denied" }, error: null }; },
     },
   };
@@ -108,6 +129,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
 
   return {
     authStateHandler,
+    sent, verified, detailIds, approvedIds,
     elements,
     location,
     timers,
@@ -185,7 +207,8 @@ test("pins the browser auth dependency and keeps both consent surfaces on the ca
     assert.match(source, /show\(session\)/);
     assert.match(source, /error_description/);
     assert.match(source, /Sign-in did not complete in this tab/);
-    assert.match(source, /location\.origin\+location\.pathname\+location\.search/);
+    assert.doesNotMatch(source, /emailRedirectTo/);
+    assert.match(source, /shouldCreateUser:false/);
   }
 });
 
@@ -228,3 +251,68 @@ for(const surface of [staticConsentPath,edgeConsentPath]){
     assert.equal(h.location.assigned,null);
   });
 }
+
+for (const surface of [staticConsentPath, edgeConsentPath]) {
+  test(`same-page OTP to explicit consent/approve, no inbox or redirect loop: ${surface.pathname}`, async () => {
+    const h=await consentHarness({surface});
+    h.elements.get('#email').value='owner@example.test';
+    await h.elements.get('#send-code').handlers.click();
+    assert.deepEqual(h.sent,[{email:'owner@example.test',options:{shouldCreateUser:false}}]);
+    assert.equal(h.elements.get('#code-entry').hidden,false);
+    assert.equal(h.location.assigned,null);
+    assert.equal(h.authorizationDetailCalls(),0);
+    h.elements.get('#email').value='different@example.test'; // verify binds the successful send
+    h.elements.get('#code').value='12345678';
+    await h.elements.get('#verify-code').handlers.click();
+    assert.deepEqual(h.verified,[{email:'owner@example.test',token:'12345678',type:'email'}]);
+    assert.equal(h.elements.get('#login').hidden,true);
+    assert.equal(h.elements.get('#consent').hidden,false);
+    assert.deepEqual(h.detailIds,['request-1']);
+    assert.equal(h.approveCalls(),0);
+    assert.equal(h.location.assigned,null);
+    await h.elements.get('#approve').handlers.click();
+    assert.deepEqual(h.approvedIds,['request-1']);
+    assert.equal(h.location.assigned,'https://example.test/approved');
+  });
+
+  test(`invalid and expired OTP fail closed: ${surface.pathname}`, async () => {
+    const h=await consentHarness({surface,verifyError:{message:'Token has expired'}});
+    h.elements.get('#email').value='owner@example.test';
+    await h.elements.get('#send-code').handlers.click();
+    for(const invalid of ['123456','123456789','12a45678']){
+      h.elements.get('#code').value=invalid;
+      await h.elements.get('#verify-code').handlers.click();
+      assert.equal(h.verified.length,0);
+    }
+    h.elements.get('#code').value='87654321';
+    await h.elements.get('#verify-code').handlers.click();
+    assert.equal(h.verified.length,1);
+    assert.equal(h.elements.get('#status').textContent,'Token has expired');
+    assert.equal(h.elements.get('#consent').hidden,true);
+    assert.equal(h.approveCalls(),0);
+    assert.equal(h.authorizationDetailCalls(),0);
+    assert.equal(h.location.assigned,null);
+  });
+
+  test(`send errors and missing authorization do not admit verification: ${surface.pathname}`, async () => {
+    const h=await consentHarness({surface,sendError:{message:'Try again in 60 seconds'}});
+    h.elements.get('#email').value='owner@example.test';
+    await h.elements.get('#send-code').handlers.click();
+    assert.equal(h.elements.get('#code-entry').hidden,true);
+    assert.match(h.elements.get('#status').textContent,/60 seconds/);
+    h.elements.get('#code').value='12345678';
+    await h.elements.get('#verify-code').handlers.click();
+    assert.equal(h.verified.length,0);
+    const absent=await consentHarness({surface,missingAuthorization:true});
+    absent.elements.get('#email').value='owner@example.test';
+    await absent.elements.get('#send-code').handlers.click();
+    assert.equal(absent.signInCalls(),0);
+    assert.equal(absent.approveCalls(),0);
+  });
+}
+
+test('hosted Magic Link template uses the same-page token, never a link',async()=>{
+  const template=await readFile(new URL('../supabase/templates/magic_link.html',import.meta.url),'utf8');
+  assert.match(template,/\{\{ \.Token \}\}/);
+  assert.doesNotMatch(template,/ConfirmationURL|TokenHash|<a\b/);
+});
