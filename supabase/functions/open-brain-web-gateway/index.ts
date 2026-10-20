@@ -35,6 +35,8 @@ const corsHeaders = {
     "accept",
     "mcp-session-id",
     "mcp-protocol-version",
+    "mcp-method",
+    "mcp-name",
     "last-event-id",
   ].join(", "),
   "access-control-expose-headers": "mcp-session-id, www-authenticate",
@@ -132,6 +134,7 @@ async function upstreamRequest(
   requestBody: unknown,
   brainKey: string,
   sessionId?: string | null,
+  clientHeaders?: Headers,
 ) {
   const body = JSON.stringify(requestBody);
   if (new TextEncoder().encode(body).byteLength > MAX_MESSAGE_BYTES) {
@@ -143,6 +146,11 @@ async function upstreamRequest(
     "x-brain-key": brainKey,
   };
   if (sessionId) headers["mcp-session-id"] = sessionId;
+  // Preserve MCP 2.0 routing without forwarding OAuth or caller identity headers.
+  for (const name of ["mcp-protocol-version", "mcp-method", "mcp-name"]) {
+    const value = clientHeaders?.get(name);
+    if (value != null) headers[name] = value;
+  }
   const response = await fetch(UPSTREAM_URL, {
     method: "POST",
     headers,
@@ -245,10 +253,19 @@ Deno.serve(async (request: Request) => {
 
   try {
     const mode = captureMode(mcpRequest);
+    const upstreamBody = requestForUpstream(mcpRequest);
+    const clientHeaders = new Headers(request.headers);
+    // Existing capture aliases change the tool name in the body; keep a matching
+    // routing header aligned, but leave malformed header/body pairs for rejection.
+    if (upstreamBody !== mcpRequest && clientHeaders.get("mcp-name") ===
+      (mcpRequest.params as { name?: string })?.name) {
+      clientHeaders.set("mcp-name", upstreamBody.params.name);
+    }
     const upstream = await upstreamRequest(
-      requestForUpstream(mcpRequest),
+      upstreamBody,
       brainKey,
       request.headers.get("mcp-session-id"),
+      clientHeaders,
     );
     let messages = parseMcpResponse(upstream.contentType, upstream.body);
     if (mcpRequest.method === "tools/list") {
