@@ -65,3 +65,5 @@ The approved existing email account must already exist; sign-up remains disabled
 Mock verification runs the actual module script from both static and fallback Edge consent surfaces with synthetic OTP/session and authorization details; no real email is sent. A mock PASS does not prove hosted email delivery or template state.
 
 Hosted Auth readback on 2026-10-20 confirms `auth.email.otp_length = 8`. Both UI surfaces validate exactly eight digits. The approved implementation follows that existing setting; do not change Auth configuration to six digits.
+
+The consent client keeps its authenticated session in SDK memory within the current tab (`persistSession:false`). This avoids reliance on browser persistent storage and cross-tab session broadcasts during the same-page code flow. Reloading the authorization page requires signing in again; approval remains explicit.
