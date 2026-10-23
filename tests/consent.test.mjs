@@ -127,7 +127,8 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
       fetch:async(url,options)=>{
         const path=new URL(url).pathname;
         let response;
-        if(path.endsWith('/otp'))response={data:{},error:null};
+        if(path.endsWith('/logout'))response={data:{},error:null};
+        else if(path.endsWith('/otp'))response={data:{},error:null};
         else if(path.endsWith('/verify'))response={data:{access_token:accessToken,refresh_token:'fixture-refresh',expires_in:3600,expires_at:exp,token_type:'bearer',user:{id:'fixture-user'}},error:null};
         else if(path.endsWith('/oauth/authorizations/request-1')){
           authorizationDetailCalls+=1;
@@ -152,6 +153,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
 
   return {
     authStateHandler,
+    signOut:()=>auth.signOut(),
     changeSession(event,session){storedSession=session;authStateHandler(event,session)},
     sent, verified, detailIds, approvedIds,
     elements,
@@ -427,4 +429,27 @@ for(const surface of [staticConsentPath,edgeConsentPath]){
     assert.equal(h.elements.get('#login').hidden,false);
     assert.equal(h.elements.get('#consent').hidden,true);
   });
+}
+
+
+for(const surface of [staticConsentPath,edgeConsentPath]){
+  const label=surface===staticConsentPath?'static':'edge';
+  for(const transition of ['signed-out','different-user']){
+    test(`${label}: ${transition} invalidates pending details before its deferred show runs`,async()=>{
+      let resolveDetails;
+      const response=new Promise(resolve=>{resolveDetails=resolve});
+      const h=await consentHarness({surface,useRealSdk:transition==='signed-out',detailsResponse:()=>response});
+      h.elements.get('#email').value='fixture@example.test';
+      await h.elements.get('#send-code').handlers.click();
+      h.elements.get('#code').value='12345678';
+      const verification=h.elements.get('#verify-code').handlers.click();
+      await settle();
+      if(transition==='signed-out')await h.signOut();
+      else h.changeSession('SIGNED_IN',{access_token:'fixture-other',user:{id:'different-user'}});
+      assert.ok(h.timers.length,'the auth-event presentation is still deferred');
+      resolveDetails({data:{redirect_url:'https://example.test/approved'},error:null});
+      await verification;
+      assert.equal(h.location.assigned,null,'old result must be invalidated at the event boundary');
+    });
+  }
 }

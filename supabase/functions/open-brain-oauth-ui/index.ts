@@ -133,6 +133,12 @@ document.querySelector('#approve').addEventListener('click',async()=>{setStatus(
 document.querySelector('#deny').addEventListener('click',async()=>{setStatus('Denying…');const {data,error}=await client.auth.oauth.denyAuthorization(authorizationId);if(error){setStatus(error.message);return}location.assign(data.redirect_url);});
 document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
 client.auth.onAuthStateChange((event,session)=>{
+  if(session||event==='SIGNED_OUT'){
+    // Invalidate old presentation now; SDK reads stay deferred below.
+    showGeneration+=1;
+    const userId=session?.user?.id||session?.access_token;
+    if(!session||detailsRequest?.userId!==userId)detailsRequest=undefined;
+  }
   if(session){login.hidden=true;consent.hidden=true;setStatus('Finishing sign-in...');setTimeout(()=>void show(session),0)}
   else if(event==='SIGNED_OUT'){setTimeout(()=>void show(null),0)}
 });

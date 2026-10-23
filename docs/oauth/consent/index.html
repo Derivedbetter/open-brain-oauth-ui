@@ -166,6 +166,12 @@ document.querySelector('#deny').addEventListener('click',async()=>{
 });
 document.querySelector('#sign-out').addEventListener('click',async()=>{await client.auth.signOut();location.reload()});
 client.auth.onAuthStateChange((event,session)=>{
+  if(session||event==='SIGNED_OUT'){
+    // Invalidate old presentation now; SDK reads stay deferred below.
+    showGeneration+=1;
+    const userId=session?.user?.id||session?.access_token;
+    if(!session||detailsRequest?.userId!==userId)detailsRequest=undefined;
+  }
   if(session){
     login.hidden=true;
     consent.hidden=true;
