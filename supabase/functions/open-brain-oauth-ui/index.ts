@@ -43,6 +43,16 @@ const login=document.querySelector('#login'), consent=document.querySelector('#c
 function setStatus(message){status.textContent=message||''}
 let showGeneration=0;
 let eventSessionAdoption;
+let detailsRequest;
+function authorizationDetails(session){
+  const userId=session.user?.id||session.access_token;
+  if(!detailsRequest||detailsRequest.userId!==userId){
+    // Details may auto-approve and consume the request. Keep its first result,
+    // including its redirect, when verifyOtp and auth events both call show().
+    detailsRequest={userId,promise:client.auth.oauth.getAuthorizationDetails(authorizationId)};
+  }
+  return detailsRequest.promise;
+}
 async function show(sessionFromEvent){
   const generation=++showGeneration;
   let session=sessionFromEvent;
@@ -62,6 +72,7 @@ async function show(sessionFromEvent){
     }
   }
   if(!session){
+    detailsRequest=undefined;
     login.hidden=false;
     consent.hidden=true;
     setStatus(callbackError||(callbackAttempted?'Sign-in did not complete in this tab. Close other Open Brain authorization tabs, then request a new code.':''));
@@ -71,7 +82,7 @@ async function show(sessionFromEvent){
   login.hidden=true;
   consent.hidden=true;
   setStatus('Finishing sign-in...');
-  const {data,error}=await client.auth.oauth.getAuthorizationDetails(authorizationId);
+  const {data,error}=await authorizationDetails(session);
   if(generation!==showGeneration)return;
   if(error||!data){setStatus(error?.message||'Invalid authorization request.');return}
   if(!('authorization_id' in data)&&data.redirect_url){location.assign(data.redirect_url);return}
