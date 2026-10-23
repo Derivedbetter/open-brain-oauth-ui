@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { AuthClient } from "@supabase/auth-js";
 import { stripTypeScriptTypes } from "node:module";
 import { runInNewContext } from "node:vm";
 
@@ -18,7 +19,7 @@ function element(overrides = {}) {
   };
 }
 
-async function consentHarness({ hash = "", initialSession = null, detailsError = null, adoptionError = null, broadcastOnAdoption = false, surface = staticConsentPath, sendError = null, verifyError = null, missingAuthorization = false } = {}) {
+async function consentHarness({ hash = "", initialSession = null, detailsError = null, adoptionError = null, broadcastOnAdoption = false, surface = staticConsentPath, sendError = null, verifyError = null, missingAuthorization = false, broadcastOnVerify = false, detailsResponse = null, approveError = null, denyError = null, useRealSdk = false } = {}) {
   let html = await readFile(surface, "utf8");
   if(surface === edgeConsentPath){
     let handler;
@@ -76,7 +77,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
   let setSessionCalls = 0;
   let storedSession = initialSession;
   const sent = [], verified = [], detailIds = [], approvedIds = [];
-  const auth = {
+  let auth = {
     async getSession() { return { data: { session: storedSession }, error: null }; },
     async setSession(session) {
       setSessionCalls += 1;
@@ -93,7 +94,8 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
     async verifyOtp(args) {
       verified.push(args);
       if(verifyError)return {data:{session:null},error:verifyError};
-      storedSession={access_token:'synthetic-otp-session',refresh_token:'synthetic-refresh'};
+      storedSession={access_token:'synthetic-otp-session',refresh_token:'synthetic-refresh',user:{id:'fixture-user'}};
+      if(broadcastOnVerify) authStateHandler('SIGNED_IN',storedSession);
       return {data:{session:storedSession},error:null};
     },
     async signOut() {},
@@ -101,6 +103,7 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
       async getAuthorizationDetails(id) {
         detailIds.push(id);
         authorizationDetailCalls += 1;
+        if(detailsResponse) return detailsResponse(authorizationDetailCalls);
         if(detailsError) return {data:null,error:detailsError};
         return {
           data: {
@@ -112,10 +115,31 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
           error: null,
         };
       },
-      async approveAuthorization(id) { approvedIds.push(id); approveCalls += 1; return { data: { redirect_url: "https://example.test/approved" }, error: null }; },
-      async denyAuthorization() { return { data: { redirect_url: "https://example.test/denied" }, error: null }; },
+      async approveAuthorization(id) { approvedIds.push(id); approveCalls += 1; return { data: { redirect_url: "https://example.test/approved" }, error: approveError }; },
+      async denyAuthorization() { return { data: { redirect_url: "https://example.test/denied" }, error: denyError }; },
     },
   };
+  if(useRealSdk){
+    const exp=Math.floor(Date.now()/1000)+3600;
+    const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+    const accessToken=encode({alg:'HS256',typ:'JWT'})+'.'+encode({sub:'fixture-user',exp})+'.'+encode('fixture-signature');
+    auth=new AuthClient({url:'https://fixture.invalid/auth/v1',persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,
+      fetch:async(url,options)=>{
+        const path=new URL(url).pathname;
+        let response;
+        if(path.endsWith('/logout'))response={data:{},error:null};
+        else if(path.endsWith('/otp'))response={data:{},error:null};
+        else if(path.endsWith('/verify'))response={data:{access_token:accessToken,refresh_token:'fixture-refresh',expires_in:3600,expires_at:exp,token_type:'bearer',user:{id:'fixture-user'}},error:null};
+        else if(path.endsWith('/oauth/authorizations/request-1')){
+          authorizationDetailCalls+=1;
+          response=await detailsResponse(authorizationDetailCalls);
+        }else if(path.endsWith('/oauth/authorizations/request-1/consent')){
+          assert.equal(JSON.parse(options.body).action,'deny');
+          response={data:{redirect_url:'https://example.test/denied'},error:null};
+        }else throw Error('Unexpected fixture request');
+        return new Response(JSON.stringify(response.error?{code:'validation_failed',message:response.error.message}:response.data),{status:response.error?400:200,headers:{'content-type':'application/json'}});
+      }});
+  }
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction(
     "createClient",
@@ -129,6 +153,8 @@ async function consentHarness({ hash = "", initialSession = null, detailsError =
 
   return {
     authStateHandler,
+    signOut:()=>auth.signOut(),
+    changeSession(event,session){storedSession=session;authStateHandler(event,session)},
     sent, verified, detailIds, approvedIds,
     elements,
     location,
@@ -316,3 +342,114 @@ test('hosted Magic Link template uses the same-page token, never a link',async()
   assert.match(template,/\{\{ \.Token \}\}/);
   assert.doesNotMatch(template,/ConfirmationURL|TokenHash|<a\b/);
 });
+
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+for(const surface of [staticConsentPath,edgeConsentPath]){
+  const label=surface===staticConsentPath?'static':'edge';
+  for(const useRealSdk of [false,true]){
+  for(const timing of ['in-flight','after-result']){
+    for(const outcome of ['auto-approved','pending','error']){
+      test(`${label}: ${useRealSdk?"pinned SDK":"mock SDK"} OTP auth event ${timing} shares ${outcome} details without consuming twice`,async()=>{
+        let resolveDetails;
+        const firstResponse=new Promise(resolve=>{resolveDetails=resolve});
+        const h=await consentHarness({surface,useRealSdk,broadcastOnVerify:true,detailsResponse:call=>call===1?firstResponse:{data:null,error:{message:'authorization request cannot be processed'}}});
+        h.elements.get('#email').value='fixture@example.test';
+        await h.elements.get('#send-code').handlers.click();
+        h.elements.get('#code').value='12345678';
+        const verification=h.elements.get('#verify-code').handlers.click();
+        await settle();
+        assert.equal(h.authorizationDetailCalls(),1);
+        assert.equal(h.timers.length,1,'verifyOtp emitted SIGNED_IN before returning its session');
+        const response=outcome==='auto-approved'?{data:{redirect_url:'https://example.test/approved',auto_approved:true},error:null}:
+          outcome==='pending'?{data:{authorization_id:'request-1',client:{name:'Fixture client'},scopes:['email']},error:null}:
+          {data:null,error:{message:'Authorization request expired'}};
+        if(timing==='after-result'){resolveDetails(response);await verification;}
+        h.timers.shift()();
+        await settle();
+        if(timing==='in-flight')resolveDetails(response);
+        await verification;
+        await settle();
+        assert.equal(h.authorizationDetailCalls(),1);
+        assert.equal(h.approveCalls(),0,'loading details never approves pending consent');
+        assert.equal(h.location.assigned,outcome==='auto-approved'?'https://example.test/approved':null);
+        assert.equal(h.elements.get('#consent').hidden,outcome!=='pending');
+        assert.equal(h.elements.get('#status').textContent,outcome==='error'?'Authorization request expired':outcome==='pending'?'':'Finishing sign-in...');
+        if(outcome==='pending'){
+          await h.elements.get('#deny').handlers.click();
+          assert.equal(h.location.assigned,'https://example.test/denied');
+          assert.equal(h.approveCalls(),0);
+        }
+      });
+    }
+  }
+  }
+  test(`${label}: explicit approve and deny errors remain errors without redirect`,async()=>{
+    for(const action of ['approve','deny']){
+      const h=await consentHarness({surface,initialSession:{access_token:'fixture-session'},[`${action}Error`]:{message:'Request cannot be processed'}});
+      await h.elements.get(`#${action}`).handlers.click();
+      assert.equal(h.location.assigned,null);
+      assert.equal(h.elements.get('#status').textContent,'Request cannot be processed');
+    }
+  });
+}
+
+
+for(const surface of [staticConsentPath,edgeConsentPath]){
+  const label=surface===staticConsentPath?'static':'edge';
+  test(`${label}: token refresh shares details, different user and signed-out session do not`,async()=>{
+    const h=await consentHarness({surface,initialSession:{access_token:'fixture-first',user:{id:'first'}}});
+    h.changeSession('TOKEN_REFRESHED',{access_token:'fixture-refreshed',user:{id:'first'}});
+    h.timers.shift()();await settle();
+    assert.equal(h.authorizationDetailCalls(),1);
+    h.changeSession('SIGNED_IN',{access_token:'fixture-other',user:{id:'second'}});
+    h.timers.shift()();await settle();
+    assert.equal(h.authorizationDetailCalls(),2);
+    h.changeSession('SIGNED_OUT',null);
+    h.timers.shift()();await settle();
+    assert.equal(h.elements.get('#consent').hidden,true);
+    h.changeSession('SIGNED_IN',{access_token:'fixture-other',user:{id:'second'}});
+    h.timers.shift()();await settle();
+    assert.equal(h.authorizationDetailCalls(),3);
+  });
+  test(`${label}: signing out while auto-approved details are in flight prevents redirect`,async()=>{
+    let resolveDetails;
+    const response=new Promise(resolve=>{resolveDetails=resolve});
+    const h=await consentHarness({surface,detailsResponse:()=>response});
+    h.elements.get('#email').value='fixture@example.test';
+    await h.elements.get('#send-code').handlers.click();
+    h.elements.get('#code').value='12345678';
+    const verification=h.elements.get('#verify-code').handlers.click();
+    await settle();
+    h.changeSession('SIGNED_OUT',null);
+    h.timers.shift()();await settle();
+    resolveDetails({data:{redirect_url:'https://example.test/approved'},error:null});
+    await verification;
+    assert.equal(h.location.assigned,null);
+    assert.equal(h.elements.get('#login').hidden,false);
+    assert.equal(h.elements.get('#consent').hidden,true);
+  });
+}
+
+
+for(const surface of [staticConsentPath,edgeConsentPath]){
+  const label=surface===staticConsentPath?'static':'edge';
+  for(const transition of ['signed-out','different-user']){
+    test(`${label}: ${transition} invalidates pending details before its deferred show runs`,async()=>{
+      let resolveDetails;
+      const response=new Promise(resolve=>{resolveDetails=resolve});
+      const h=await consentHarness({surface,useRealSdk:transition==='signed-out',detailsResponse:()=>response});
+      h.elements.get('#email').value='fixture@example.test';
+      await h.elements.get('#send-code').handlers.click();
+      h.elements.get('#code').value='12345678';
+      const verification=h.elements.get('#verify-code').handlers.click();
+      await settle();
+      if(transition==='signed-out')await h.signOut();
+      else h.changeSession('SIGNED_IN',{access_token:'fixture-other',user:{id:'different-user'}});
+      assert.ok(h.timers.length,'the auth-event presentation is still deferred');
+      resolveDetails({data:{redirect_url:'https://example.test/approved'},error:null});
+      await verification;
+      assert.equal(h.location.assigned,null,'old result must be invalidated at the event boundary');
+    });
+  }
+}
