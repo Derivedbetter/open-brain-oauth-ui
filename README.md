@@ -43,6 +43,7 @@ Test discovery and unauthenticated failure before connecting a client:
 
 - `GET /functions/v1/open-brain-web-gateway/.well-known/oauth-protected-resource` returns protected-resource metadata.
 - `GET /functions/v1/open-brain-web-gateway/readonly/.well-known/oauth-protected-resource` returns distinct read-only protected-resource metadata.
+- `GET /functions/v1/open-brain-web-gateway/.well-known/openid-configuration` and the `oauth-authorization-server` sibling mirror the existing Auth issuer's public discovery document. The issuer remains `/auth/v1`, and tokens still come from `/auth/v1/oauth/token`; no credentials are forwarded. An unavailable or mismatched issuer document returns `503`. These function-local compatibility paths do not change project-root routing or prove a particular client's refresh behavior.
 - unauthenticated `POST /functions/v1/open-brain-web-gateway` returns `401` and an OAuth `WWW-Authenticate` challenge.
 - authenticated `tools/list` on `/functions/v1/open-brain-web-gateway/readonly` omits every write/delete tool, and direct write calls fail closed.
 - OAuth clients are endpoint-scoped: read-only client tokens are rejected by the full-access route, and full-access client tokens are rejected by the read-only route.
