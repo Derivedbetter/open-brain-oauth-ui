@@ -1,3 +1,4 @@
+import { botClientPolicy, bindBotRequest, filterBotToolList, filterBotFetch } from "./bot-policy.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   appendCaptureEvidence,
@@ -228,6 +229,12 @@ Deno.serve(async (request: Request) => {
 
   const authorization = await authorize(request, resourceUrl, readOnly);
   if (authorization.error) return authorization.error;
+  let botPolicy;
+  try {
+    botPolicy = botClientPolicy(Deno.env.get("OPEN_BRAIN_BOT_CLIENT_POLICIES"), authorization.clientId);
+  } catch {
+    return json({ error: "bot_policy_not_configured" }, 503);
+  }
   if (request.method !== "POST") {
     return json({ error: "method_not_allowed" }, 405, { allow: "POST, OPTIONS" });
   }
@@ -245,6 +252,13 @@ Deno.serve(async (request: Request) => {
     mcpRequest = JSON.parse(rawBody);
   } catch {
     return json({ error: "invalid_json" }, 400);
+  }
+
+  try {
+    mcpRequest = bindBotRequest(mcpRequest, botPolicy, readOnly);
+  } catch {
+    return json({ jsonrpc: "2.0", id: mcpRequest?.id ?? null,
+      error: { code: -32601, message: "Request outside this OAuth Bot client policy" } });
   }
 
   if (readOnly && !readOnlyRequestAllowed(mcpRequest)) {
@@ -268,9 +282,11 @@ Deno.serve(async (request: Request) => {
       clientHeaders,
     );
     let messages = parseMcpResponse(upstream.contentType, upstream.body);
+    messages = filterBotFetch(messages, mcpRequest, botPolicy);
     if (mcpRequest.method === "tools/list") {
       messages = decorateToolList(messages);
       if (readOnly) messages = filterReadOnlyToolList(messages);
+      messages = filterBotToolList(messages, botPolicy, readOnly);
     }
     const captureContent = (mcpRequest.params as {
       arguments?: { content?: unknown };
