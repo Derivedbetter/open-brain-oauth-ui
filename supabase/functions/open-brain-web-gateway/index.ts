@@ -70,6 +70,27 @@ function protectedResourceMetadata(resourceUrl: string, readOnly: boolean) {
   };
 }
 
+// Some clients rediscover the issuer at the resource's function-local URL.
+// Mirror public Auth metadata; this gateway never becomes a token issuer.
+async function issuerMetadata() {
+  try {
+    const response = await fetch(`${AUTH_ISSUER}/.well-known/openid-configuration`, {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) throw new Error("Issuer metadata unavailable");
+    const metadata = await response.json();
+    if (metadata.issuer !== AUTH_ISSUER ||
+        metadata.token_endpoint !== `${AUTH_ISSUER}/oauth/token`) {
+      throw new Error("Unexpected issuer metadata");
+    }
+    return json(metadata, 200, { "cache-control": "no-store" });
+  } catch {
+    return json({ error: "issuer_metadata_unavailable" }, 503);
+  }
+}
+
 async function authorize(request: Request, resourceUrl: string, readOnly: boolean) {
   const header = request.headers.get("authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(header);
@@ -229,6 +250,10 @@ Deno.serve(async (request: Request) => {
   if (url.pathname.endsWith("/.well-known/oauth-protected-resource")) {
     return json(protectedResourceMetadata(resourceUrl, readOnly));
   }
+  if (request.method === "GET" && [
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
+  ].includes(gatewaySuffix)) return issuerMetadata();
 
   const authorization = await authorize(request, resourceUrl, readOnly);
   if (authorization.error) return authorization.error;
