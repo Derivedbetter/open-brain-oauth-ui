@@ -1,0 +1,59 @@
+{
+  "repository": "Derivedbetter/open-brain-memory-maturity-v1",
+  "commit": "ccf229a8fcdae0aabf1f712ace0e4540e32c1456",
+  "files": [
+    {
+      "path": "index.ts",
+      "sha256": "afa080c970cc071486cc0c19e70d0e87c807eb60517c0121105c83c150991e1e",
+      "tools": [
+        "search",
+        "fetch",
+        "search_thoughts",
+        "list_thoughts",
+        "thought_stats",
+        "edit_thought",
+        "capture_thought",
+        "capture_memory",
+        "write_work_receipt",
+        "relate_memories",
+        "record_recall_usage",
+        "export_memory_changes",
+        "memory_audit",
+        "list_work_receipts",
+        "message_counts",
+        "list_memory_index",
+        "set_board_judgement",
+        "set_lifecycle_status",
+        "clear_derived_action_items",
+        "correct_board_judgement",
+        "correct_legacy_board_tag"
+      ]
+    },
+    {
+      "path": "internal-messaging.mjs",
+      "sha256": "beb3283c7188dc7507854b11b1b822ebadcc51501c49c3850c21199389b582d8",
+      "tools": [
+        "pending_messages",
+        "send_message",
+        "check_messages",
+        "consume_message"
+      ]
+    },
+    {
+      "path": "operations-telemetry.mjs",
+      "sha256": "b0932077784460056b0e4f818c43b8d51f4d0c92fc06bbcb5d02a0454521f8a3",
+      "tools": [
+        "record_machine_alive",
+        "check_machine_alive",
+        "record_quota_usage"
+      ]
+    },
+    {
+      "path": "capture-coop.mjs",
+      "sha256": "3761872f68aff71e39cacaee938dbdeb85e7ab26e203098371f7ba216212ac46",
+      "tools": [
+        "submit_capture_candidate"
+      ]
+    }
+  ]
+}

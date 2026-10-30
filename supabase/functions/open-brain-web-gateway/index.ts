@@ -136,6 +136,7 @@ async function upstreamRequest(
   brainKey: string,
   sessionId?: string | null,
   clientHeaders?: Headers,
+  trustedBotActor?: string,
 ) {
   const body = JSON.stringify(requestBody);
   if (new TextEncoder().encode(body).byteLength > MAX_MESSAGE_BYTES) {
@@ -147,6 +148,7 @@ async function upstreamRequest(
     "x-brain-key": brainKey,
   };
   if (sessionId) headers["mcp-session-id"] = sessionId;
+  if (trustedBotActor) headers["x-open-brain-client"] = trustedBotActor;
   // Preserve MCP 2.0 routing without forwarding OAuth or caller identity headers.
   for (const name of ["mcp-protocol-version", "mcp-method", "mcp-name"]) {
     const value = clientHeaders?.get(name);
@@ -176,13 +178,14 @@ async function verifyCapture(
   mode: string,
   brainKey: string,
   sessionId?: string | null,
+  trustedBotActor?: string,
 ) {
   const search = await upstreamRequest({
     jsonrpc: "2.0",
     id: `web-gateway-search-${crypto.randomUUID()}`,
     method: "tools/call",
     params: { name: "search", arguments: { query: content } },
-  }, brainKey, sessionId);
+  }, brainKey, sessionId, undefined, trustedBotActor);
   let candidates: Array<Record<string, unknown>> = [];
   try {
     const messages = parseMcpResponse(search.contentType, search.body);
@@ -200,7 +203,7 @@ async function verifyCapture(
       id: `web-gateway-fetch-${crypto.randomUUID()}`,
       method: "tools/call",
       params: { name: "fetch", arguments: { id: candidate.id } },
-    }, brainKey, search.sessionId);
+    }, brainKey, search.sessionId, undefined, trustedBotActor);
     try {
       const messages = parseMcpResponse(fetched.contentType, fetched.body);
       const thought = resultJson(messages) as Record<string, unknown> | null;
@@ -280,6 +283,7 @@ Deno.serve(async (request: Request) => {
       brainKey,
       request.headers.get("mcp-session-id"),
       clientHeaders,
+      botPolicy?.actor,
     );
     let messages = parseMcpResponse(upstream.contentType, upstream.body);
     messages = filterBotFetch(messages, mcpRequest, botPolicy);
@@ -304,6 +308,7 @@ Deno.serve(async (request: Request) => {
           mode,
           brainKey,
           upstream.sessionId,
+          botPolicy?.actor,
         );
       } catch {
         evidence = null;
