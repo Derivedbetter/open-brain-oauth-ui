@@ -13,7 +13,9 @@ const configuration = (p) => JSON.stringify({ "bot-client": p });
 
 test("strict server policy refuses malformed phases/identities and retains legacy client behavior", () => {
   for (const bad of ["[]", "null", "not-json", configuration({ ...read, phase: "full" }),
-    configuration({ ...read, actor: "Tony" }), configuration({ ...read, extra: true }),
+    configuration({ ...read, actor: "Tony" }), configuration({ ...read, actor: [actor] }),
+    configuration({ ...read, actor: null }), configuration({ ...read, actor: {} }),
+    configuration({ ...read, extra: true }),
     configuration({ ...read, recipients: ["lead", "lead"] })]) assert.throws(() => bot.botClientPolicy(bad, "bot-client"));
   assert.deepEqual(bot.botClientPolicy(configuration(read), "bot-client"), read);
   assert.equal(bot.botClientPolicy(configuration(read), "legacy"), null);

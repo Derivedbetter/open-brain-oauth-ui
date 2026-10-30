@@ -14,7 +14,7 @@ export function botClientPolicy(serialized, clientId) {
   if (!plain(policies)) throw new Error("Invalid Bot client policy");
   for (const [id, p] of Object.entries(policies)) {
     if (!id.trim() || !plain(p) || Object.keys(p).some(k => !["actor", "phase", "recipients"].includes(k)) ||
-        !BOT.test(p.actor) || !PHASES.has(p.phase) || !Array.isArray(p.recipients) ||
+        typeof p.actor !== "string" || !BOT.test(p.actor) || !PHASES.has(p.phase) || !Array.isArray(p.recipients) ||
         p.recipients.length > 16 || p.recipients.some(r => typeof r !== "string" ||
           !/^[a-z0-9][a-z0-9/-]{0,199}$/.test(r) || r.endsWith("/") || r.includes("//")) ||
         new Set(p.recipients).size !== p.recipients.length) {
