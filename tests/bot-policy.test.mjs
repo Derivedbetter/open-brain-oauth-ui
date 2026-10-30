@@ -58,9 +58,10 @@ test("full-route Advisor read/write parity binds real writes without phase promo
 });
 
 test("actual maintained tool registrations receive full route parity and eight-route readonly protection", () => {
-  const root = new URL("../../open-brain-parity-source/extensions/tony-memory-maturity-v1/functions/open-brain-mcp/", import.meta.url);
-  const names = ["index.ts", "internal-messaging.mjs", "operations-telemetry.mjs", "capture-coop.mjs"].flatMap(file =>
-    [...readFileSync(new URL(file, root), "utf8").matchAll(/registerTool\(\s*["']([^"']+)/g)].map(m => m[1]));
+  // Pinned public source fixture keeps this repository's tests standalone.
+  // The private cross-repo integration check verifies it against exact core bytes.
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/core-tool-registrations.json", import.meta.url), "utf8"));
+  const names = fixture.files.flatMap(file => file.tools);
   assert.equal(names.length, 29);
   names.push("capture_thought_exact", "capture_thought_summary");
   const messages = () => [{ result: { tools: names.map(name => ({ name, inputSchema: { properties: { recipient: {}, recipients: {}, sender: {}, source_actor: {}, actor: {}, statement_origin: {}, review: {} } } })) } }];
