@@ -1,6 +1,6 @@
 {
   "repository": "Derivedbetter/open-brain-memory-maturity-v1",
-  "commit": "ccf229a8fcdae0aabf1f712ace0e4540e32c1456",
+  "commit": "e692615f8f977589a8b6e505a971d441c4a430c1",
   "files": [
     {
       "path": "index.ts",
@@ -31,7 +31,7 @@
     },
     {
       "path": "internal-messaging.mjs",
-      "sha256": "beb3283c7188dc7507854b11b1b822ebadcc51501c49c3850c21199389b582d8",
+      "sha256": "b9d589c72f7e3131ee0849eebee50f30a020b3cb5dd1a0e98c8ae004eec3b7c4",
       "tools": [
         "pending_messages",
         "send_message",

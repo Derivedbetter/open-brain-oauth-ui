@@ -151,3 +151,38 @@ test("actual full handler supports capture aliases and edits with trusted Bot pr
     assert.equal(r.calls.length, 0);
   }
 });
+
+
+test("four authorized Advisor principals retain full parity with exact own-mail and actor binding", async () => {
+  for (const host of ["prime", "bee", "mac", "boompro"]) {
+    const seat = `grok/advisor/${host}`;
+    const policy = { actor: seat };
+    assert.deepEqual(bot.botClientPolicy(configuration(policy), "bot-client"), policy);
+    assert.equal(bot.bindBotRequest(call("check_messages"), policy, false).params.arguments.recipient, seat);
+    assert.deepEqual(bot.bindBotRequest(call("pending_messages"), policy, false).params.arguments.recipients, [seat]);
+    assert.equal(bot.bindBotRequest(call("consume_message"), policy, false).params.arguments.recipient, seat);
+    assert.equal(bot.bindBotRequest(call("capture_memory"), policy, false).params.arguments.source_actor, seat);
+    assert.equal(bot.bindBotRequest(call("send_message", { recipient: "lead" }), policy, false).params.arguments.sender, seat);
+    for (const args of [{ recipient: "grok/bot/corty" }, { recipient: "codex/advisor/prime" }, { recipient: `grok/advisor/${host === "prime" ? "bee" : "prime"}` }])
+      assert.throws(() => bot.bindBotRequest(call("check_messages", args), policy, false));
+    for (const source_actor of ["Tony", "grok/bot/corty", "codex/advisor/prime"])
+      assert.throws(() => bot.bindBotRequest(call("capture_memory", { source_actor }), policy, false));
+    assert.throws(() => bot.bindBotRequest(call("send_message", { sender: "lead" }), policy, false));
+    assert.throws(() => bot.bindBotRequest(call("write_work_receipt"), policy, true));
+    const f = fixture(policy);
+    assert.equal((await f.request(call("write_work_receipt"), "", { "x-open-brain-client": "lead" })).status, 200);
+    assert.equal(f.calls[0].headers["x-open-brain-client"], seat);
+    assert.equal(f.calls[0].body.params.arguments.source_actor, seat);
+    const own = [{ result: { content: [{ type: "text", text: JSON.stringify({ id: "fixture", text: "Synthetic mail", metadata: { storage: "messaging", record_kind: "message", type: "internal_message", recipient: seat } }) }] } }];
+    assert.equal(bot.filterBotFetch(own, call("fetch"), policy)[0].result.isError, undefined);
+    const foreign = structuredClone(own);
+    foreign[0].result.content[0].text = foreign[0].result.content[0].text.replace(seat, "grok/bot/corty");
+    assert.equal(bot.filterBotFetch(foreign, call("fetch"), policy)[0].result.isError, true);
+  }
+});
+
+test("Advisor role and host admission rejects unapproved or malformed principals", () => {
+  for (const seat of ["grok/advisor/wsl", "grok/advisor/linux", "grok/advisor/", "grok/worker/prime", "grok/advisor/prime/task", "grok/advisor/../lead", "grok/advisor/prime-other", "GROK/advisor/prime"])
+    assert.throws(() => bot.botClientPolicy(configuration({ actor: seat }), "bot-client"), seat);
+  assert.deepEqual(bot.botClientPolicy(configuration({ actor }), "bot-client"), { actor }); // existing Corty unchanged
+});
