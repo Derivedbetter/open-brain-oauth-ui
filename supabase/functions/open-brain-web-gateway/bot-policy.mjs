@@ -1,6 +1,6 @@
 import { isReadOnlyTool } from "./lib.mjs";
 
-const BOT = /^grok\/bot\/[a-z0-9][a-z0-9-]{0,62}$/;
+const PRINCIPAL = /^grok\/(?:bot\/[a-z0-9][a-z0-9-]{0,62}|advisor\/(?:prime|bee|mac|boompro))$/;
 const CAPTURES = new Set(["capture_thought", "capture_thought_exact", "capture_thought_summary", "capture_memory"]);
 const SOURCE_ACTORS = new Set([...CAPTURES, "write_work_receipt", "relate_memories"]);
 const ACTORS = new Set(["set_board_judgement", "set_lifecycle_status", "clear_derived_action_items", "correct_board_judgement", "correct_legacy_board_tag"]);
@@ -15,7 +15,7 @@ export function botClientPolicy(serialized, clientId) {
   if (!plain(policies)) throw new Error("Invalid Bot client policy");
   for (const [id, p] of Object.entries(policies)) {
     if (!id.trim() || !plain(p) || Object.keys(p).some(k => k !== "actor") ||
-        typeof p.actor !== "string" || !BOT.test(p.actor)) {
+        typeof p.actor !== "string" || !PRINCIPAL.test(p.actor)) {
       throw new Error("Invalid Bot client policy");
     }
   }
