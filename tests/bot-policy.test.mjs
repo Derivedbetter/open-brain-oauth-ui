@@ -6,8 +6,8 @@ import * as lib from "../supabase/functions/open-brain-web-gateway/lib.mjs";
 import * as bot from "../supabase/functions/open-brain-web-gateway/bot-policy.mjs";
 
 const actor = "grok/bot/corty";
-const read = { actor, phase: "readonly", recipients: [] };
-const write = { actor, phase: "own_mail_receipt", recipients: ["codex/advisor/prime"] };
+const read = { actor };
+const write = read;
 const call = (name, args = {}) => ({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name, arguments: args } });
 const configuration = (p) => JSON.stringify({ "bot-client": p });
 
@@ -16,7 +16,7 @@ test("strict server policy refuses malformed phases/identities and retains legac
     configuration({ ...read, actor: "Tony" }), configuration({ ...read, actor: [actor] }),
     configuration({ ...read, actor: null }), configuration({ ...read, actor: {} }),
     configuration({ ...read, extra: true }),
-    configuration({ ...read, recipients: ["lead", "lead"] })]) assert.throws(() => bot.botClientPolicy(bad, "bot-client"));
+    configuration({ ...read, recipients: ["lead"] })]) assert.throws(() => bot.botClientPolicy(bad, "bot-client"));
   assert.deepEqual(bot.botClientPolicy(configuration(read), "bot-client"), read);
   assert.equal(bot.botClientPolicy(configuration(read), "legacy"), null);
   const admin = call("set_memory_lifecycle", { actor: "Tony" });
@@ -28,33 +28,47 @@ test("own mailbox binding refuses identity spoof and read-only writes on either 
   for (const args of [{ recipient: "lead" }, { recipient: "grok/bot/other" }, { actor: "Tony" }, { sender: "lead" }])
     assert.throws(() => bot.bindBotRequest(call("check_messages", args), read, false));
   for (const name of ["send_message", "consume_message", "write_work_receipt", "capture_thought", "pending_messages", "set_memory_lifecycle"])
-    assert.throws(() => bot.bindBotRequest(call(name), read, false));
+    assert.throws(() => bot.bindBotRequest(call(name), read, true));
   assert.throws(() => bot.bindBotRequest(call("write_work_receipt"), write, true));
   for (const request of [[], null, { method: "resources/read" }, { method: "notifications/cancelled" }])
     assert.throws(() => bot.bindBotRequest(request, read, false));
 });
 
-test("promoted client has only own mail and agent work receipt, never review or owner authority", () => {
-  const receipt = bot.bindBotRequest(call("write_work_receipt", { meaningful_outcome: "Synthetic fixture only" }), write, false);
-  assert.equal(receipt.params.arguments.source_actor, actor);
-  assert.throws(() => bot.bindBotRequest(call("write_work_receipt", { source_actor: "Tony" }), write, false));
-  assert.throws(() => bot.bindBotRequest(call("consume_message", { recipient: "lead" }), write, false));
-  assert.equal(bot.bindBotRequest(call("consume_message"), write, false).params.arguments.recipient, actor);
-  const send = call("send_message", { recipient: "codex/advisor/prime", content: "Synthetic fixture receipt" });
-  assert.equal(bot.bindBotRequest(send, write, false).params.arguments.sender, actor);
-  for (const args of [{ recipient: "lead" }, { recipient: "codex/advisor/prime", sender: "lead" },
-    { recipient: "codex/advisor/prime", review: {} }, { recipient: "codex/advisor/prime", intent: "task_handoff" }])
-    assert.throws(() => bot.bindBotRequest(call("send_message", args), write, false));
-  assert.throws(() => bot.bindBotRequest(call("capture_thought", { source_actor: actor }), write, false));
+test("full-route Advisor read/write parity binds real writes without phase promotion", () => {
+  for (const name of ["capture_thought", "capture_thought_exact", "capture_thought_summary", "capture_memory", "write_work_receipt", "relate_memories"]) {
+    const args = bot.bindBotRequest(call(name, { content: "Synthetic fixture" }), write, false).params.arguments;
+    assert.equal(args.source_actor, actor);
+  }
+  for (const name of ["set_board_judgement", "set_lifecycle_status", "clear_derived_action_items", "correct_board_judgement", "correct_legacy_board_tag"])
+    assert.equal(bot.bindBotRequest(call(name), write, false).params.arguments.actor, actor);
+  for (const name of ["edit_thought", "record_recall_usage", "record_machine_alive", "record_quota_usage"])
+    assert.equal(bot.bindBotRequest(call(name), write, false).params.name, name);
+  const send = bot.bindBotRequest(call("send_message", { recipient: "lead", intent: "request", review: { owner_record: "synthetic" } }), write, false);
+  assert.equal(send.params.arguments.sender, actor);
+  assert.equal(send.params.arguments.intent, "request");
+  assert.deepEqual(send.params.arguments.review, { owner_record: "synthetic" }); // existing core review gate still validates it
+  assert.equal(bot.bindBotRequest(call("capture_memory"), write, false).params.arguments.statement_origin, "agent_generated");
+  for (const args of [{ source_actor: "Tony" }, { statement_origin: "owner_direct" }, { statement_origin: "mixed" },
+    { corrects: { verification_basis: "owner_direct" } }, { corrects: { verification_actor: "claude/advisor/prime" } }])
+    assert.throws(() => bot.bindBotRequest(call("capture_memory", args), write, false));
+  assert.throws(() => bot.bindBotRequest(call("relate_memories", { verification_actor: "Tony" }), write, false));
+  assert.throws(() => bot.bindBotRequest(call("submit_capture_candidate"), write, false));
+  assert.equal(bot.bindBotRequest(call("pending_messages"), write, false).params.arguments.recipients[0], actor);
+  assert.throws(() => bot.bindBotRequest(call("pending_messages", { recipients: ["lead"] }), write, false));
 });
 
-test("tool lists disclose exactly eight reads then only three bounded writes; SSE remains valid", () => {
-  const names = ["check_messages", "export_memory_changes", "fetch", "list_thoughts", "memory_audit", "search", "search_thoughts", "thought_stats", "send_message", "consume_message", "write_work_receipt", "capture_thought", "set_memory_lifecycle"];
-  const messages = () => [{ result: { tools: names.map(name => ({ name, inputSchema: { properties: { recipient: {}, sender: {}, source_actor: {}, review: {} } } })) } }];
-  assert.equal(bot.filterBotToolList(messages(), read, false)[0].result.tools.length, 8);
+test("actual maintained tool registrations receive full route parity and eight-route readonly protection", () => {
+  const root = new URL("../../open-brain-parity-source/extensions/tony-memory-maturity-v1/functions/open-brain-mcp/", import.meta.url);
+  const names = ["index.ts", "internal-messaging.mjs", "operations-telemetry.mjs", "capture-coop.mjs"].flatMap(file =>
+    [...readFileSync(new URL(file, root), "utf8").matchAll(/registerTool\(\s*["']([^"']+)/g)].map(m => m[1]));
+  assert.equal(names.length, 29);
+  names.push("capture_thought_exact", "capture_thought_summary");
+  const messages = () => [{ result: { tools: names.map(name => ({ name, inputSchema: { properties: { recipient: {}, recipients: {}, sender: {}, source_actor: {}, actor: {}, statement_origin: {}, review: {} } } })) } }];
   const scoped = bot.filterBotToolList(messages(), write, false);
-  assert.equal(scoped[0].result.tools.length, 11);
-  assert.equal(scoped[0].result.tools.find(t => t.name === "check_messages").inputSchema.properties.recipient.const, actor);
+  assert.deepEqual(scoped[0].result.tools.map(t => t.name), names.filter(n => n !== "submit_capture_candidate"));
+  for (const name of names.filter(n => n !== "submit_capture_candidate")) assert.equal(bot.bindBotRequest(call(name), write, false).params.name, name);
+  assert.equal(bot.filterBotToolList(messages(), read, true)[0].result.tools.length, 8);
+  assert.equal(scoped[0].result.tools.find(t => t.name === "capture_memory").inputSchema.properties.source_actor.const, actor);
   assert.deepEqual(lib.parseMcpResponse("text/event-stream", lib.serializeMcpResponse("text/event-stream", scoped)), scoped);
 });
 
@@ -91,7 +105,7 @@ test("actual handler stamps verified client identity, strips caller identity hea
   assert.equal(result.status, 200);
   assert.equal(f.calls[0].body.params.arguments.source_actor, actor);
   const headers = f.calls[0].headers;
-  assert.equal(headers["x-open-brain-client"], undefined);
+  assert.equal(headers["x-open-brain-client"], actor);
   assert.equal(headers["x-bot-actor"], undefined);
   assert.equal(headers["mcp-name"], "write_work_receipt");
   assert.equal(headers["mcp-protocol-version"], "2025-03-26");
@@ -103,10 +117,36 @@ test("actual handler never calls upstream on invalid OAuth, policy or scoped ope
   }
   const bad = fixture(read, { env: { OPEN_BRAIN_BOT_CLIENT_POLICIES: '{"bot-client":{"phase":"full"}}' } });
   assert.equal((await bad.request(call("search"))).status, 503); assert.equal(bad.calls.length, 0);
-  for (const [p, request, path] of [[read, call("write_work_receipt"), ""], [write, call("write_work_receipt"), "/readonly"], [read, call("check_messages", { recipient: "lead" }), ""]]) {
+  for (const [p, request, path] of [[read, call("capture_memory", { source_actor: "Tony" }), ""], [write, call("write_work_receipt"), "/readonly"], [read, call("check_messages", { recipient: "lead" }), ""]]) {
     const f = fixture(p); assert.equal((await (await f.request(request, path)).json()).error.code, -32601); assert.equal(f.calls.length, 0);
   }
   const legacy = fixture(read, { claims: { client_id: "legacy" } });
   assert.equal((await legacy.request(call("capture_thought"))).status, 200);
   assert.equal(legacy.calls[0].body.params.name, "capture_thought");
+});
+
+
+test("actual full handler supports capture aliases and edits with trusted Bot provenance", async () => {
+  for (const name of ["capture_thought", "capture_thought_exact", "capture_thought_summary", "capture_memory", "edit_thought", "set_lifecycle_status", "send_message"]) {
+    const f = fixture();
+    const input = { content: "Synthetic parity fixture", expected_content: "Synthetic old text", recipient: "lead" };
+    assert.equal((await f.request(call(name, input), "", { "x-open-brain-client": "Tony", "x-bot-actor": "lead", "mcp-name": name })).status, 200);
+    const forwarded = f.calls[0];
+    assert.equal(forwarded.headers["x-open-brain-client"], actor);
+    assert.equal(forwarded.headers["x-bot-actor"], undefined);
+    if (name.startsWith("capture_")) {
+      assert.equal(forwarded.body.params.arguments.source_actor, actor);
+      assert.equal(forwarded.body.params.arguments.statement_origin, "agent_generated");
+      if (name === "capture_thought_exact" || name === "capture_thought_summary") {
+        assert.equal(forwarded.body.params.name, "capture_thought");
+        assert.equal(forwarded.headers["mcp-name"], "capture_thought");
+      }
+    }
+    if (name === "edit_thought") assert.equal(forwarded.body.params.arguments.expected_content, input.expected_content);
+    if (name === "set_lifecycle_status") assert.equal(forwarded.body.params.arguments.actor, actor);
+    if (name === "send_message") assert.equal(forwarded.body.params.arguments.sender, actor);
+    const r = fixture();
+    assert.equal((await (await r.request(call(name, input), "/readonly")).json()).error.code, -32601);
+    assert.equal(r.calls.length, 0);
+  }
 });
