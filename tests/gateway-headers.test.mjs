@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
+import * as bot from "../supabase/functions/open-brain-web-gateway/bot-policy.mjs";
 import * as lib from "../supabase/functions/open-brain-web-gateway/lib.mjs";
 
 // Load the actual HTTP handler with synthetic auth and a fail-closed HTTP mock.
@@ -25,8 +26,9 @@ function fixture() {
   const createClient = () => ({ auth: { getUser: async () => ({ data: { user: {
     id: "user", email: "user@example.test",
   } }, error: null }) } });
-  new Function("createClient", ...Object.keys(lib), "Deno", "fetch", stripTypeScriptTypes(source))(
-    createClient, ...Object.values(lib), { env: { get: key => env[key] }, serve: fn => { handler = fn; } }, fetch,
+  const dependencies = { ...lib, ...bot };
+  new Function("createClient", ...Object.keys(dependencies), "Deno", "fetch", stripTypeScriptTypes(source))(
+    createClient, ...Object.values(dependencies), { env: { get: key => env[key] }, serve: fn => { handler = fn; } }, fetch,
   );
   const token = client => {
     const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
